@@ -1,0 +1,39 @@
+[
+  {
+    "keyword": "المفتي",
+    "categories": ["رد السلام", "من أنا"],
+    "file": "/answers/greeting.json"
+  },
+  {
+    "keyword": "الشهادة",
+    "categories": ["مفتاح الجنة", "التشهد"],
+    "file": "/answers/hajj.json"
+  },
+  {
+    "keyword": "الصلاة",
+    "categories": ["فرض", "سنة", "جمعة", "تراويح"],
+    "file": "/answers/prayer.json"
+  },
+  {
+    "keyword": "الصيام",
+    "categories": ["رمضان", "تطوع", "قضاء", "نذر"],
+    "file": "/answers/sawm.json"
+  },
+  {
+    "keyword": "الزكاة",
+    "categories": ["مال", "صدقة"],
+    "file": "/answers/zakat.json"
+  },
+  {
+    "keyword": "الحج",
+    "categories": ["السعي", "الطواف"],
+    "file": "/answers/hajj.json"
+  },
+  {
+    "keyword": "الاسلام",
+    "categories": ["اسلام", "مسلم"],
+    "file": "/answers/islam.json"
+  }
+]
+
+
