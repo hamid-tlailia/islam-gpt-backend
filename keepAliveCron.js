@@ -1,7 +1,7 @@
 const https = require('https');
 
 // Replace 'your-service-url' with your actual Render service URL
-const SERVICE_URL = 'https://hamidos-chat-backend.onrender.com/health-check';
+const SERVICE_URL = 'https://islamic-qa-backend.onrender.com/health-check';
 
 function pingService() {
   https.get(SERVICE_URL, (res) => {
