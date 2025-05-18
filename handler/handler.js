@@ -1,5 +1,7 @@
 const fs = require("fs");
 const path = require("path");
+const { handleMissingQ } = require("./missingQ");
+const { handleMultyQ } = require("./multyQ");
 
 function loadJSON(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -69,7 +71,15 @@ function extractKeywordAndContext(text, keywordsRaw) {
       }
     }
 
-    if (found.matchedBy || found.type || found.condition || found.place) {
+    const all = [
+      keyword,
+      ...(data.variants || []),
+      ...Object.values(data.types || {}).flat(),
+      ...Object.values(data.conditions || {}).flat(),
+      ...Object.values(data.places || {}).flat()
+    ];
+
+    if (all.some((v) => lowered.includes(v.toLowerCase()))) {
       possibleMatches.push(found);
     }
   }
@@ -101,7 +111,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
     if (type && entry.type === type) {
       score++;
     } else if (!type && !entry.type) {
-      score += 0.5; // تفضيل الإجابات العامة إذا لم يحدد المستخدم النوع
+      score += 0.5;
     }
 
     let condMatched = false;
@@ -115,7 +125,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
       condMatched = matchedConds.length > 0;
 
       if (userConds.length === 1 && entryConds.length > 1 && condMatched) {
-        continue; // تجاهل هذه الإجابة
+        continue;
       }
 
       score += matchedConds.length;
@@ -137,14 +147,53 @@ function findBestAnswer(answers, intent, type, condition, place) {
   return best;
 }
 
+function advancedSplit(text) {
+  const connectors = [
+    "،", "؛", "\\.", "؟", "!",  
+    "\\bثم\\b", "\\bأو\\b", "\\bلكن\\b", "\\bبعد\\b", "\\bقبل\\b", "\\bو\\b"
+  ];
+
+  const regex = new RegExp(`\\s*(?:${connectors.join("|")})\\s*`, "gi");
+
+  return text
+    .split(regex)
+    .map((part) => part.trim())
+    .filter((part) => part.length > 2);
+}
+
+function isMultyQuestion(text, intentsRaw, keywordsRaw) {
+  const parts = advancedSplit(text);
+  const foundIntents = new Set();
+  const foundKeywords = new Set();
+
+  for (const part of parts) {
+    const intent = extractIntent(part, intentsRaw);
+    const kwMatches = extractKeywordAndContext(part, keywordsRaw);
+    if (intent) foundIntents.add(intent);
+    for (const m of kwMatches) {
+      foundKeywords.add(m.keyword);
+    }
+  }
+
+  return foundIntents.size > 1 || foundKeywords.size > 1;
+}
+
 function findAnswer(question, previousContext = {}, basePath = "./data") {
   const intentsRaw = loadJSON(path.join(basePath, "Q_structure/intent.json"));
-  const keywordsRaw = loadJSON(
-    path.join(basePath, "Q_structure/keywords.json")
-  );
+  const keywordsRaw = loadJSON(path.join(basePath, "Q_structure/keywords.json"));
   const remote = loadJSON(path.join(__dirname, "remoteQuestion.json"));
 
   const lowered = question.toLowerCase();
+
+  // ✅ فحص إذا كان السؤال متعدد
+  const isMulty = isMultyQuestion(question, intentsRaw, keywordsRaw);
+  if (isMulty) {
+    console.log("complex q");
+    const multiResult = handleMultyQ(question, previousContext, basePath);
+    if (multiResult) return multiResult;
+  }
+
+  // 🔍 تحليل فردي
   const newIntent = extractIntent(lowered, intentsRaw);
   const keywordMatches = extractKeywordAndContext(lowered, keywordsRaw);
   const uniqueKeywords = [...new Set(keywordMatches.map((m) => m.keyword))];
@@ -156,58 +205,11 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   const condition = matched.condition || previousContext.condition || null;
   const place = matched.place || previousContext.place || null;
 
-  if (!keyword && !intent) {
-    return {
-      ask: "clarify",
-      message: "لم أستطع فهم سؤالك بدقة، هل يمكنك توضيحه؟",
-      available: {
-        keyword: false,
-        intent: false,
-        context: false,
-      },
-      context: {},
-    };
+  if (!keyword || !intent) {
+    return handleMissingQ(question);
   }
 
-  if (uniqueKeywords.length > 1 && !intent) {
-    return {
-      ask: "keyword",
-      message:
-        "سؤالك يحتمل أكثر من موضوع: " +
-        uniqueKeywords.join(" أو ") +
-        ". من فضلك حدّد.",
-      available: {
-        keyword: false,
-        intent: false,
-        context: true,
-      },
-      context: {},
-    };
-  }
-
-  const answers = keyword
-    ? loadAnswersForKeyword(keyword, remote, basePath)
-    : [];
-  const kwMeta = keyword ? keywordsRaw[keyword] : null;
-  const needsIntent = kwMeta?.needClarification !== false;
-
-  if (!intent && needsIntent) {
-    return {
-      ask: "intent",
-      message:
-        "سؤالك يتعلق بـ " +
-        keyword +
-        ". من فضلك وضّح نيتك (حكم؟ تعريف ؟ كيفية؟).",
-      keyword,
-      available: {
-        keyword: true,
-        intent: false,
-        context: matched.matchedBy !== "variant",
-      },
-      context: { keyword, type, condition, place },
-    };
-  }
-
+  const answers = loadAnswersForKeyword(keyword, remote, basePath);
   const result = findBestAnswer(answers, intent, type, condition, place);
 
   if (result) {
