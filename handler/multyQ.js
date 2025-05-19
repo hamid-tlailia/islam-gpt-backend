@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const { handleMissingQ } = require("./missingQ");
 
 function loadJSON(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
@@ -138,20 +139,53 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
   const lowered = question.toLowerCase();
   const intentPositions = extractIntentPositions(lowered, intentsRaw);
 
-  if (intentPositions.length < 2) {
-    return null;
-  }
+  if (intentPositions.length === 0) return null;
 
   const answersBundle = [];
+  const incompleteParts = [];
 
+  // توزيع intent حسب الموقع
+  const parts = [];
   for (let i = 0; i < intentPositions.length; i++) {
     const start = intentPositions[i].index;
     const end = intentPositions[i + 1]
       ? intentPositions[i + 1].index
       : question.length;
-    const part = question.slice(start, end).trim();
-    const intent = intentPositions[i].intent;
-    const context = extractContextFromPart(part, keywordsRaw);
+
+    const textChunk = question.slice(start, end).trim();
+
+    // تقسيم حسب "و"
+    const subParts = textChunk
+      .split(/\s*و\s*/)
+      .map((p) => p.trim())
+      .filter(Boolean);
+
+    for (const sub of subParts) {
+      // استخراج السياق للتأكد من وجود كلمة مفتاحية
+      const context = extractContextFromPart(sub, keywordsRaw);
+
+      if (context?.keyword) {
+        parts.push({
+          text: sub,
+          intent: intentPositions[i].intent,
+        });
+      }
+    }
+  }
+
+  // تعميم النية عند الحاجة
+  let lastIntent = null;
+  for (let i = 0; i < parts.length; i++) {
+    if (parts[i].intent) {
+      lastIntent = parts[i].intent;
+    } else if (lastIntent) {
+      parts[i].intent = lastIntent;
+    }
+  }
+
+  for (const part of parts) {
+    const context = extractContextFromPart(part.text, keywordsRaw);
+    const intent = part.intent;
     const keyword = context?.keyword;
     const type = context?.type || null;
     const condition = context?.condition || [];
@@ -170,30 +204,44 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
         answer: best.answer,
         proof: best.proof,
       });
-    } else if (intent) {
-      answersBundle.push({
-        question: `ما ${intent}؟`,
-        intent,
-        keyword: null,
-        answer: "يرجى تحديد الموضوع المرتبط بهذه النية.",
-        proof: [],
-      });
-    } else if (keyword) {
-      answersBundle.push({
-        question: `ما المطلوب بخصوص ${keyword}؟`,
-        intent: null,
-        keyword,
-        answer: "يرجى توضيح نوع السؤال المرتبط بهذا الموضوع.",
-        proof: [],
-      });
     } else {
-      answersBundle.push({
-        question: part,
-        intent: null,
-        keyword: null,
-        answer: "تعذر فهم هذا الجزء من السؤال.",
-        proof: [],
-      });
+      // سؤال ناقص → مرّره إلى missingQ
+      const missing = handleMissingQ(part.text, basePath);
+
+      if (missing.intent && missing.keyword) {
+        const answers = loadAnswersForKeyword(
+          missing.keyword,
+          remote,
+          basePath
+        );
+        const best = findBestAnswer(
+          answers,
+          missing.intent,
+          missing.type,
+          missing.condition,
+          missing.place
+        );
+
+        answersBundle.push({
+          question: part.text,
+          intent: missing.intent,
+          keyword: missing.keyword,
+          type: missing.type,
+          condition: missing.condition,
+          place: missing.place,
+          answer: best.answer,
+          proof: best.proof,
+        });
+      } else {
+        // لم تكتمل الإجابة
+        return {
+          ask: missing.ask,
+          message: missing.message,
+          context: missing.context,
+          available: missing.available,
+          hold: answersBundle,
+        };
+      }
     }
   }
 
@@ -202,7 +250,6 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
     message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
     answers: answersBundle,
     context: previousContext,
-    multy : true,
   };
 }
 

@@ -76,7 +76,7 @@ function extractKeywordAndContext(text, keywordsRaw) {
       ...(data.variants || []),
       ...Object.values(data.types || {}).flat(),
       ...Object.values(data.conditions || {}).flat(),
-      ...Object.values(data.places || {}).flat()
+      ...Object.values(data.places || {}).flat(),
     ];
 
     if (all.some((v) => lowered.includes(v.toLowerCase()))) {
@@ -149,8 +149,17 @@ function findBestAnswer(answers, intent, type, condition, place) {
 
 function advancedSplit(text) {
   const connectors = [
-    "،", "؛", "\\.", "؟", "!",  
-    "\\bثم\\b", "\\bأو\\b", "\\bلكن\\b", "\\bبعد\\b", "\\bقبل\\b", "\\bو\\b"
+    "،",
+    "؛",
+    "\\.",
+    "؟",
+    "!",
+    "\\bثم\\b",
+    "\\bأو\\b",
+    "\\bلكن\\b",
+    "\\bبعد\\b",
+    "\\bقبل\\b",
+    "\\bو\\b",
   ];
 
   const regex = new RegExp(`\\s*(?:${connectors.join("|")})\\s*`, "gi");
@@ -180,7 +189,9 @@ function isMultyQuestion(text, intentsRaw, keywordsRaw) {
 
 function findAnswer(question, previousContext = {}, basePath = "./data") {
   const intentsRaw = loadJSON(path.join(basePath, "Q_structure/intent.json"));
-  const keywordsRaw = loadJSON(path.join(basePath, "Q_structure/keywords.json"));
+  const keywordsRaw = loadJSON(
+    path.join(basePath, "Q_structure/keywords.json")
+  );
   const remote = loadJSON(path.join(__dirname, "remoteQuestion.json"));
 
   const lowered = question.toLowerCase();
@@ -188,7 +199,6 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   // ✅ فحص إذا كان السؤال متعدد
   const isMulty = isMultyQuestion(question, intentsRaw, keywordsRaw);
   if (isMulty) {
-    console.log("complex q");
     const multiResult = handleMultyQ(question, previousContext, basePath);
     if (multiResult) return multiResult;
   }
