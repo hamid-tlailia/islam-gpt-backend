@@ -203,9 +203,12 @@ function handleMissingQ(question, basePath = "./data") {
   const typeKeywordCombos = contextMatches
     .map((m) => m.keyword)
     .filter(Boolean);
-   const responseLogic =  normalizeWithType(fullContext?.keyword || "", fullContext?.type || "");
+  const responseLogic = normalizeWithType(
+    fullContext?.keyword || "",
+    fullContext?.type || ""
+  );
   /* ❶ لا Keyword مُصرَّح + ≥1 مرشح ⇒ اسأل عن Keyword */
-  if (!fullContext.keyword && uniqueKeywords.length >= 1) {
+  if (!fullContext.keyword && uniqueKeywords.length > 1) {
     partialContext = fullContext;
     return {
       ask: "keyword",
@@ -216,9 +219,35 @@ function handleMissingQ(question, basePath = "./data") {
       context: fullContext,
     };
   }
-
+  if (!fullContext.keyword && uniqueKeywords.length === 1) {
+    fullContext.keyword = uniqueKeywords[0];
+    // Find the first match for this keyword to extract type/condition/place
+    const match = contextMatches.find((m) => m.keyword === fullContext.keyword);
+    let extra = "";
+    if (match) {
+      if (match.type) extra = ` (${match.type})`;
+      else if (match.condition)
+        extra = ` (${
+          Array.isArray(match.condition)
+            ? match.condition.join("، ")
+            : match.condition
+        })`;
+      else if (match.place) extra = ` (${match.place})`;
+    }
+    partialContext = fullContext;
+    return {
+      ask: "intent",
+      message: `ما الذي تود معرفته بخصوص ${normalizeWithType(
+        fullContext.keyword || "",
+        fullContext.type || ""
+      )}${extra}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
+      keyword: fullContext.keyword,
+      available: { keyword: true, intent: false, context: true },
+      context: fullContext,
+    };
+  }
   /* ❷ Keyword موجودة لكن لا Intent ⇒ اسأل عن النيّة */
-  if (fullContext.keyword && !extractedIntent) {
+  if (fullContext.keyword && !extractedIntent && uniqueKeywords.length === 1) {
     partialContext = fullContext;
     return {
       ask: "intent",
