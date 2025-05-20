@@ -180,11 +180,14 @@ function isMultyQuestion(text, intentsRaw, keywordsRaw) {
     const kwMatches = extractKeywordAndContext(part, keywordsRaw);
     if (intent) foundIntents.add(intent);
     for (const m of kwMatches) {
-      foundKeywords.add(m.keyword);
+      m.matchedBy === "variant" && foundKeywords.add(m.keyword);
     }
   }
 
-  return foundIntents.size > 1 || foundKeywords.size > 1;
+  return {
+    state: foundIntents.size > 1 || foundKeywords.size > 1,
+    founds: { foundIntents, foundKeywords },
+  };
 }
 
 function findAnswer(question, previousContext = {}, basePath = "./data") {
@@ -198,8 +201,9 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
 
   // ✅ فحص إذا كان السؤال متعدد
   const isMulty = isMultyQuestion(question, intentsRaw, keywordsRaw);
-  if (isMulty) {
-    const multiResult = handleMultyQ(question, previousContext, basePath);
+  if (isMulty.state && isMulty.founds.foundIntents.size > 0) {
+    // handle multi question
+    const multiResult = handleMultyQ(question, isMulty.founds, basePath);
     if (multiResult) return multiResult;
   }
 
@@ -214,7 +218,39 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   const type = matched.type || previousContext.type || null;
   const condition = matched.condition || previousContext.condition || null;
   const place = matched.place || previousContext.place || null;
+  // handle missing complex question
+  if (isMulty.state) {
+    // Check if the question is only one word (ignoring spaces)
+    const isSingleWord = question.trim().split(/\s+/).length === 1;
 
+    if (
+      isMulty.founds.foundIntents.size === 0 &&
+      isMulty.founds.foundKeywords.size > 1 &&
+      question.length > 1 &&
+      !isSingleWord
+    ) {
+      const definitionIntent = "تعريف"; // or use the intent name for "definition" in your intents file
+      const uniqueKeywords = [...isMulty.founds.foundKeywords];
+      console.log("uniqueKeywords", uniqueKeywords);
+      const definitions = uniqueKeywords.map((kw) => {
+      const answers = loadAnswersForKeyword(kw, remote, basePath);
+      const def = findBestAnswer(answers, definitionIntent, null, null, null);
+      return {
+        keyword: kw,
+        intent: definitionIntent,
+        answer: def
+        ? Array.isArray(def.answers)
+          ? def.answers[Math.floor(Math.random() * def.answers.length)]
+          : def.answer
+        : "لم أجد تعريفًا لهذا المصطلح.",
+        ref: def && def.proof ? def.proof : [],
+        score: def ? 1 : 0.6,
+      };
+      });
+      return { definitions };
+    }
+  }
+  // handle simple missing question
   if (!keyword || !intent) {
     return handleMissingQ(question);
   }

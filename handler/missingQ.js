@@ -31,7 +31,8 @@ function advancedSplit(text) {
 
 function normalizeWithType(keyword, type) {
   const clean = keyword.replace(/^ال/, "").trim();
-  return type ? `${type} ${clean}` : `ال${clean}`;
+  const cleanType = type && !type.startsWith("ال") ? `ال${type}` : type;
+  return type ? `${clean} ${cleanType}` : `ال${clean}`;
 }
 
 function extractFromContext(text, keywordsRaw) {
@@ -200,16 +201,16 @@ function handleMissingQ(question, basePath = "./data") {
   /* --- تجهيز البدائل --- */
   const uniqueKeywords = [...new Set(contextMatches.map((m) => m.keyword))];
   const typeKeywordCombos = contextMatches
-    .map((m) => normalizeWithType(m.keyword, m.type))
+    .map((m) => m.keyword)
     .filter(Boolean);
-
+   const responseLogic =  normalizeWithType(fullContext?.keyword || "", fullContext?.type || "");
   /* ❶ لا Keyword مُصرَّح + ≥1 مرشح ⇒ اسأل عن Keyword */
   if (!fullContext.keyword && uniqueKeywords.length >= 1) {
     partialContext = fullContext;
     return {
       ask: "keyword",
-      message: `سؤالك عن "${question}" يحتمل موضوعًا واحدًا أو أكثر: ${typeKeywordCombos.join(
-        " أو "
+      message: `سؤالك عن "${question}" يحتمل أكثر من موضوع :  ${typeKeywordCombos.join(
+        " أم "
       )}. من فضلك حدّد أيّها تقصد.`,
       available: { keyword: false, intent: !!extractedIntent, context: true },
       context: fullContext,
@@ -221,7 +222,7 @@ function handleMissingQ(question, basePath = "./data") {
     partialContext = fullContext;
     return {
       ask: "intent",
-      message: `ما الذي تود معرفته بخصوص ${question.trim()}؟ (مثال: حكمه، تعريفه، أو كيفية أدائه). يرجى تحديد النية.`,
+      message: `ما الذي تود معرفته بخصوص ${responseLogic}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
       keyword: fullContext.keyword,
       available: { keyword: true, intent: false, context: true },
       context: fullContext,

@@ -129,7 +129,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
     : { answer: "لم يتم العثور على إجابة دقيقة.", proof: [] };
 }
 
-function handleMultyQ(question, previousContext = {}, basePath = "./data") {
+function handleMultyQ(question, founds, basePath = "./data") {
   const intentsRaw = loadJSON(path.join(basePath, "Q_structure/intent.json"));
   const keywordsRaw = loadJSON(
     path.join(basePath, "Q_structure/keywords.json")
@@ -153,10 +153,9 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
       : question.length;
 
     const textChunk = question.slice(start, end).trim();
-
     // تقسيم حسب "و"
     const subParts = textChunk
-      .split(/\s*و\s*/)
+      .split(/(?:^|\s)و\s+/)
       .map((p) => p.trim())
       .filter(Boolean);
 
@@ -190,12 +189,17 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
     const type = context?.type || null;
     const condition = context?.condition || [];
     const place = context?.place || null;
-
+    let hasAvailable = "";
+    if (type) hasAvailable += `(${type})`;
+    if (place) hasAvailable += (hasAvailable ? "،" : "") + ` (${place})`;
+    if (condition && Array.isArray(condition) && condition.length > 0) {
+      hasAvailable += (hasAvailable ? "،" : "") + `  (${condition.join(", ")})`;
+    }
     if (intent && keyword) {
       const answers = loadAnswersForKeyword(keyword, remote, basePath);
       const best = findBestAnswer(answers, intent, type, condition, place);
       answersBundle.push({
-        question: `ما ${intent} ${keyword}؟`,
+        question: `ما ${intent} ${keyword} ${hasAvailable} ؟`,
         intent,
         keyword,
         type,
@@ -249,7 +253,7 @@ function handleMultyQ(question, previousContext = {}, basePath = "./data") {
     ask: "split",
     message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
     answers: answersBundle,
-    context: previousContext,
+    context: founds,
   };
 }
 
