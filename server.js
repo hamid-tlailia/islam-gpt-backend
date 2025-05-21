@@ -2,6 +2,8 @@ const express = require("express");
 const cors = require("cors");
 const bodyParser = require("body-parser");
 const { findAnswer } = require("./handler/handler"); // أو المسار حسب موقع الملف
+// import nlp handler
+const { correctTypos } = require("./NLP/nlp");
 // import keep alive cron
 const keepAliveCron = require("./keepAliveCron");
 // start the cron
@@ -16,9 +18,10 @@ app.post("/api/ask", (req, res) => {
   if (!question || typeof question !== "string") {
     return res.status(400).json({ error: "Question is required." });
   }
-  console.log(previousContext);
+  const correctedQ = correctTypos(question); // ✅ تصحيح السؤال
+  console.log("Corrected Question:", correctedQ);
   try {
-    const response = findAnswer(question, previousContext || {});
+    const response = findAnswer(correctedQ, previousContext || {});
     res.json(response);
   } catch (err) {
     console.error("Error:", err);

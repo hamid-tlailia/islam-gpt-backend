@@ -92,16 +92,31 @@ function extractFromContext(text, keywordsRaw) {
   return contextMatches;
 }
 
-function extractIntent(text, intentsRaw) {
+function extractAllIntents(text, intentsRaw) {
   text = text.toLowerCase();
-  const intents = Object.entries(intentsRaw).map(([intent, obj]) => ({
-    intent,
-    patterns: obj.patterns,
-  }));
-  const matched = intents.find(({ patterns }) =>
-    patterns.some((p) => text.includes(p.toLowerCase()))
-  );
-  return matched ? matched.intent : null;
+  const foundIntents = [];
+
+  for (const [intent, obj] of Object.entries(intentsRaw)) {
+    for (const p of obj.patterns) {
+      const pattern = p
+        .toLowerCase()
+        .trim()
+        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const regex = new RegExp(
+        `(^|[\\s،؛؟.!"'()\\[\\]{}])${pattern}($|[\\s،؛؟.!"'()\\[\\]{}])`,
+        "i"
+      );
+
+      const matched = regex.test(text);
+
+      if (matched) {
+        foundIntents.push(intent);
+        break;
+      }
+    }
+  }
+
+  return foundIntents;
 }
 
 function loadAnswersForKeyword(keyword, remote, basePath) {
@@ -155,7 +170,8 @@ function handleMissingQ(question, basePath = "./data") {
   const cleanedParts = advancedSplit(question.toLowerCase());
 
   /* --- النيّة --- */
-  const foundIntent = extractIntent(question, intentsRaw);
+  const allIntents = extractAllIntents(question, intentsRaw);
+  const foundIntent = allIntents.length === 1 ? allIntents[0] : null;
   if (foundIntent) partialContext.intent = foundIntent;
 
   let extractedIntent = partialContext.intent || null;
@@ -207,6 +223,33 @@ function handleMissingQ(question, basePath = "./data") {
     fullContext?.keyword || "",
     fullContext?.type || ""
   );
+  // ✅ إذا تم ذكر أكثر من نية ولم تُذكر الكلمة المفتاحية
+  if (allIntents.length > 1 && !fullContext.keyword) {
+    return {
+      ask: "intent",
+      message: `ذكرت أكثر من نية (${allIntents.join(
+        "، "
+      )}). من فضلك حدّد أي نية تقصد تحديدًا.`,
+      available: { keyword: false, intent: false, context: false },
+      context: fullContext,
+    };
+  }
+
+  // ✅ إذا تم ذكر نية واحدة فقط بدون كلمة مفتاحية
+  if (
+    allIntents.length === 1 &&
+    !fullContext.keyword &&
+    question.trim().split(/\s+/).length <= 3
+  ) {
+    const intent = allIntents[0];
+    return {
+      ask: "keyword",
+      message: `ذكرت النية "${intent}" فقط. من فضلك حدد الموضوع الذي تريد معرفة "${intent}" بشأنه. (مثال: ${intent} الصلاة، ${intent} الصيام...)`,
+      available: { keyword: false, intent: true, context: false },
+      context: fullContext,
+    };
+  }
+
   /* ❶ لا Keyword مُصرَّح + ≥1 مرشح ⇒ اسأل عن Keyword */
   if (!fullContext.keyword && uniqueKeywords.length > 1) {
     partialContext = fullContext;

@@ -142,7 +142,6 @@ function handleMultyQ(question, founds, basePath = "./data") {
   if (intentPositions.length === 0) return null;
 
   const answersBundle = [];
-  const incompleteParts = [];
 
   // توزيع intent حسب الموقع
   const parts = [];
@@ -158,6 +157,24 @@ function handleMultyQ(question, founds, basePath = "./data") {
       .split(/(?:^|\s)و\s+/)
       .map((p) => p.trim())
       .filter(Boolean);
+    // 🟡 إذا لم نجد "و" وقمنا باستخراج نية واحدة فقط، حاول التقطيع حسب المسافات
+    if (subParts.length === 1 && intentPositions.length === 1) {
+      const words = textChunk.split(/\s+/).filter(Boolean);
+      const potentialParts = [];
+      for (const word of words) {
+        const context = extractContextFromPart(word, keywordsRaw);
+        if (context?.keyword) {
+          potentialParts.push({
+            text: word,
+            intent: intentPositions[i].intent,
+          });
+        }
+      }
+      if (potentialParts.length > 1) {
+        parts.push(...potentialParts);
+        continue; // تجاهل الجزء الأصلي
+      }
+    }
 
     for (const sub of subParts) {
       // استخراج السياق للتأكد من وجود كلمة مفتاحية
