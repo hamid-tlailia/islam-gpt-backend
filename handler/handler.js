@@ -211,13 +211,24 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   const newIntent = extractIntent(lowered, intentsRaw);
   const keywordMatches = extractKeywordAndContext(lowered, keywordsRaw);
   const uniqueKeywords = [...new Set(keywordMatches.map((m) => m.keyword))];
-
+  const splitedQ = question
+    .split(/\s+/)
+    .map((part) => (part.startsWith("ال") ? part : "ال" + part).trim())
+    .filter((part) => part.length > 0);
+  const mentionedQ = splitedQ
+    .map((part) =>
+      keywordMatches.find(
+        (match) => match.keyword.toLowerCase() === part.toLowerCase()
+      )
+    )
+    .find((match) => match !== undefined);
   const intent = newIntent || previousContext.intent || null;
-  const matched = keywordMatches[0] || {};
+  const matched = mentionedQ || keywordMatches[0] || {};
   const keyword = matched.keyword || previousContext.keyword || null;
   const type = matched.type || previousContext.type || null;
   const condition = matched.condition || previousContext.condition || null;
   const place = matched.place || previousContext.place || null;
+
   // handle missing complex question
   if (isMulty.state) {
     // Check if the question is only one word (ignoring spaces)
@@ -231,28 +242,37 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
     ) {
       const definitionIntent = "تعريف"; // or use the intent name for "definition" in your intents file
       const uniqueKeywords = [...isMulty.founds.foundKeywords];
-      console.log("uniqueKeywords", uniqueKeywords);
       const definitions = uniqueKeywords.map((kw) => {
-      const answers = loadAnswersForKeyword(kw, remote, basePath);
-      const def = findBestAnswer(answers, definitionIntent, null, null, null);
-      return {
-        keyword: kw,
-        intent: definitionIntent,
-        answer: def
-        ? Array.isArray(def.answers)
-          ? def.answers[Math.floor(Math.random() * def.answers.length)]
-          : def.answer
-        : "لم أجد تعريفًا لهذا المصطلح.",
-        ref: def && def.proof ? def.proof : [],
-        score: def ? 1 : 0.6,
-      };
+        const answers = loadAnswersForKeyword(kw, remote, basePath);
+        const def = findBestAnswer(answers, definitionIntent, null, null, null);
+        return {
+          keyword: kw,
+          intent: definitionIntent,
+          answer: def
+            ? Array.isArray(def.answers)
+              ? def.answers[Math.floor(Math.random() * def.answers.length)]
+              : def.answer
+            : "لم أجد تعريفًا لهذا المصطلح.",
+          ref: def && def.proof ? def.proof : [],
+          score: def ? 1 : 0.6,
+        };
       });
       return { definitions };
     }
   }
   // handle simple missing question
+  const parts = question
+    .split(/\s+/)
+    .map((part) => (part.startsWith("ال") ? part : "ال" + part).trim())
+    .filter((part) => part.length > 0);
+  const matchedKeyword = parts.find((part) =>
+    keywordMatches.some(
+      (match) => match.keyword.toLowerCase() === part.toLowerCase()
+    )
+  );
+
   if (!keyword || !intent) {
-    return handleMissingQ(question);
+    return handleMissingQ(question, matchedKeyword || "");
   }
 
   const answers = loadAnswersForKeyword(keyword, remote, basePath);

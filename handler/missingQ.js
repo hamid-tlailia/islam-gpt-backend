@@ -35,7 +35,7 @@ function normalizeWithType(keyword, type) {
   return type ? `${clean} ${cleanType}` : `ال${clean}`;
 }
 
-function extractFromContext(text, keywordsRaw) {
+function extractFromContext(text, question, keywordsRaw) {
   const lowered = text.toLowerCase();
   const contextMatches = [];
 
@@ -56,7 +56,13 @@ function extractFromContext(text, keywordsRaw) {
     /* ===== type match ===== */
     if (data.types) {
       for (const [type, vals] of Object.entries(data.types)) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+        if (
+          vals.some((v) =>
+            question.includes(v.toLowerCase())
+              ? question.includes(v.toLowerCase())
+              : lowered.includes(v.toLowerCase())
+          )
+        ) {
           found.type = type;
           found.matchedBy = found.matchedBy || "type";
         }
@@ -160,7 +166,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
 }
 
 /* =========== الدالّة الرئيسة =========== */
-function handleMissingQ(question, basePath = "./data") {
+function handleMissingQ(question, matchedKeyword, basePath = "./data") {
   const keywordsRaw = loadJSON(
     path.join(basePath, "Q_structure/keywords.json")
   );
@@ -180,7 +186,7 @@ function handleMissingQ(question, basePath = "./data") {
   /* --- تحليل السياق --- */
   let contextMatches = [];
   for (const part of cleanedParts) {
-    const matches = extractFromContext(part, keywordsRaw);
+    const matches = extractFromContext(part, question, keywordsRaw);
     contextMatches = contextMatches.concat(matches);
 
     if (matches.length === 0) continue;
@@ -227,10 +233,10 @@ function handleMissingQ(question, basePath = "./data") {
   if (allIntents.length > 1 && !fullContext.keyword) {
     return {
       ask: "intent",
-      message: `ذكرت أكثر من نية (${allIntents.join(
+      message: `ما الذي تشير إليه بخصوص (${allIntents.join(
         "، "
-      )}). من فضلك حدّد أي نية تقصد تحديدًا.`,
-      available: { keyword: false, intent: false, context: false },
+      )})؟ فقط أخبرني و سوف أجيبك على الفور.`,
+      available: { keyword: false, intent: true, context: true },
       context: fullContext,
     };
   }
@@ -244,14 +250,18 @@ function handleMissingQ(question, basePath = "./data") {
     const intent = allIntents[0];
     return {
       ask: "keyword",
-      message: `ذكرت النية "${intent}" فقط. من فضلك حدد الموضوع الذي تريد معرفة "${intent}" بشأنه. (مثال: ${intent} الصلاة، ${intent} الصيام...)`,
+      message: `ارى انك تريد معرفة ${intent} مسالة معينة فهل يمكنك توضيحها و سوف افيك بالجواب حالا مثلا : ${intent} الصلاة , ${intent} الصيام... , إذا كنت تشير إلى شيء آخر، يرجى التوضيح.`,
       available: { keyword: false, intent: true, context: false },
       context: fullContext,
     };
   }
 
   /* ❶ لا Keyword مُصرَّح + ≥1 مرشح ⇒ اسأل عن Keyword */
-  if (!fullContext.keyword && uniqueKeywords.length > 1) {
+  if (
+    !fullContext.keyword &&
+    uniqueKeywords.length > 1 &&
+    matchedKeyword === ""
+  ) {
     partialContext = fullContext;
     return {
       ask: "keyword",
@@ -262,8 +272,11 @@ function handleMissingQ(question, basePath = "./data") {
       context: fullContext,
     };
   }
-  if (!fullContext.keyword && uniqueKeywords.length === 1) {
-    fullContext.keyword = uniqueKeywords[0];
+  if (
+    (!fullContext.keyword && uniqueKeywords.length === 1) ||
+    (matchedKeyword && fullContext.intent === "")
+  ) {
+    fullContext.keyword = matchedKeyword ? matchedKeyword : uniqueKeywords[0];
     // Find the first match for this keyword to extract type/condition/place
     const match = contextMatches.find((m) => m.keyword === fullContext.keyword);
     let extra = "";
@@ -277,13 +290,14 @@ function handleMissingQ(question, basePath = "./data") {
         })`;
       else if (match.place) extra = ` (${match.place})`;
     }
+    const isType = !fullContext.type ? extra : "";
     partialContext = fullContext;
     return {
       ask: "intent",
       message: `ما الذي تود معرفته بخصوص ${normalizeWithType(
         fullContext.keyword || "",
         fullContext.type || ""
-      )}${extra}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
+      )}${isType}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
       keyword: fullContext.keyword,
       available: { keyword: true, intent: false, context: true },
       context: fullContext,
@@ -294,7 +308,7 @@ function handleMissingQ(question, basePath = "./data") {
     partialContext = fullContext;
     return {
       ask: "intent",
-      message: `ما الذي تود معرفته بخصوص ${responseLogic}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
+      message: `ما الذي تود معرفته بخصوص ${responseLogic}؟ (مثال: حكم، تعريف...). يرجى التحديد  .`,
       keyword: fullContext.keyword,
       available: { keyword: true, intent: false, context: true },
       context: fullContext,
@@ -317,7 +331,7 @@ function handleMissingQ(question, basePath = "./data") {
   const answers = loadAnswersForKeyword(fullContext.keyword, remote, basePath);
   const result = findBestAnswer(
     answers,
-    extractedIntent,
+    extractedIntent || fullContext?.intent || "",
     fullContext.type,
     fullContext.condition,
     fullContext.place

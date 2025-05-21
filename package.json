@@ -11,8 +11,11 @@
   "license": "ISC",
   "dependencies": {
     "cors": "^2.8.5",
+    "didyoumean2": "^7.0.4",
     "dotenv": "^16.5.0",
     "express": "^5.1.0",
+    "fs": "^0.0.1-security",
+    "natural": "^8.0.1",
     "nodemon": "^3.1.10"
   }
 }
