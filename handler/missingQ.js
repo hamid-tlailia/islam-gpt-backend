@@ -250,7 +250,7 @@ function handleMissingQ(question, matchedKeyword, basePath = "./data") {
     const intent = allIntents[0];
     return {
       ask: "keyword",
-      message: `ارى انك تريد معرفة ${intent} مسالة معينة فهل يمكنك توضيحها و سوف افيك بالجواب حالا مثلا : ${intent} الصلاة , ${intent} الصيام... , إذا كنت تشير إلى شيء آخر، يرجى التوضيح.`,
+      message: `ارى انك تريد معرفة ${intent} مسالة معينة فهل يمكنك توضيحها و سوف افيك بالجواب حالا , مثلا : ${intent} الصلاة , ${intent} الصيام... , إذا كنت تشير إلى شيء آخر، يرجى التوضيح.`,
       available: { keyword: false, intent: true, context: false },
       context: fullContext,
     };
@@ -263,6 +263,7 @@ function handleMissingQ(question, matchedKeyword, basePath = "./data") {
     matchedKeyword === ""
   ) {
     partialContext = fullContext;
+
     return {
       ask: "keyword",
       message: `سؤالك عن "${question}" يحتمل أكثر من موضوع :  ${typeKeywordCombos.join(
@@ -272,10 +273,7 @@ function handleMissingQ(question, matchedKeyword, basePath = "./data") {
       context: fullContext,
     };
   }
-  if (
-    (!fullContext.keyword && uniqueKeywords.length === 1) ||
-    (matchedKeyword && fullContext.intent === "")
-  ) {
+  if ((!fullContext.keyword && uniqueKeywords.length === 1) || matchedKeyword) {
     fullContext.keyword = matchedKeyword ? matchedKeyword : uniqueKeywords[0];
     // Find the first match for this keyword to extract type/condition/place
     const match = contextMatches.find((m) => m.keyword === fullContext.keyword);
@@ -304,7 +302,7 @@ function handleMissingQ(question, matchedKeyword, basePath = "./data") {
     };
   }
   /* ❷ Keyword موجودة لكن لا Intent ⇒ اسأل عن النيّة */
-  if (fullContext.keyword && !extractedIntent && uniqueKeywords.length === 1) {
+  if (fullContext.keyword && !extractedIntent && uniqueKeywords.length === 1 && fullContext.intent === '') {
     partialContext = fullContext;
     return {
       ask: "intent",
