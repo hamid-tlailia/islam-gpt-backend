@@ -29,6 +29,11 @@
     "categories": ["السعي", "الطواف"],
     "file": "/answers/hajj.json"
   },
+    {
+    "keyword": "الايمان",
+    "categories": [],
+    "file": "/answers/iman.json"
+  },
   {
     "keyword": "الاسلام",
     "categories": ["اسلام", "مسلم"],

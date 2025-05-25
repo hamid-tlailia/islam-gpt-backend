@@ -24,7 +24,7 @@ app.post("/api/ask", (req, res) => {
   const correctedQ = correctTypos(question); // ✅ تصحيح السؤال
   console.log("Corrected Question:", correctedQ);
   try {
-    const response = findAnswer(question, previousContext || {});
+    const response = findAnswer(correctedQ, previousContext || {});
     res.json(response);
   } catch (err) {
     console.error("Error:", err);

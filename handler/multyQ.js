@@ -1,4 +1,5 @@
 const fs = require("fs");
+
 const path = require("path");
 const { handleMissingQ } = require("./missingQ");
 
@@ -144,105 +145,76 @@ function handleMultyQ(question, founds, basePath = "./data") {
   const answersBundle = [];
 
   // توزيع intent حسب الموقع
-  const parts = [];
-  for (let i = 0; i < intentPositions.length; i++) {
-    const start = intentPositions[i].index;
-    const end = intentPositions[i + 1]
-      ? intentPositions[i + 1].index
-      : question.length;
-
-    const textChunk = question.slice(start, end).trim();
-    // تقسيم حسب "و"
-    const subParts = textChunk
-      .split(/(?:^|\s)و\s+/)
-      .map((p) => p.trim())
-      .filter(Boolean);
-    // 🟡 إذا لم نجد "و" وقمنا باستخراج نية واحدة فقط، حاول التقطيع حسب المسافات
-    if (subParts.length === 1 && intentPositions.length === 1) {
-      const words = textChunk.split(/\s+/).filter(Boolean);
-      const potentialParts = [];
-      for (const word of words) {
-        const context = extractContextFromPart(word, keywordsRaw);
-        if (context?.keyword) {
-          potentialParts.push({
-            text: word,
-            intent: intentPositions[i].intent,
-          });
-        }
-      }
-      if (potentialParts.length > 1) {
-        parts.push(...potentialParts);
-        continue; // تجاهل الجزء الأصلي
-      }
+  /* ── ❶ أضِف الدالة أعلى الملف (أو في أي مكان قبل استخدامها) ───────── */
+  function adjustIntentForFirstKeyword(parts) {
+    // إذا كان أول مقطع لا يملك intent → اجعله "تعريف"
+    if (parts.length > 0 && !parts[0].intent) {
+      parts[0].intent = "تعريف";
     }
-
-    for (const sub of subParts) {
-      // استخراج السياق للتأكد من وجود كلمة مفتاحية
-      const context = extractContextFromPart(sub, keywordsRaw);
-
-      if (context?.keyword) {
-        parts.push({
-          text: sub,
-          intent: intentPositions[i].intent,
-        });
-      }
-    }
+    return parts;
   }
 
-  // تعميم النية عند الحاجة
-  let lastIntent = null;
-  for (let i = 0; i < parts.length; i++) {
-    if (parts[i].intent) {
-      lastIntent = parts[i].intent;
-    } else if (lastIntent) {
-      parts[i].intent = lastIntent;
+  /* ── ❷ بناء مصفوفة parts كما في كودك الحالي ────────────────────────── */
+  const parts = [];
+
+  /* — A) أجزاء تسبق كل نيّة صريحة أو تقع بينها — */
+  let cursor = 0;
+  intentPositions.forEach((pos, idx) => {
+    /* جزء قبل النيّة الحالية */
+    if (pos.index > cursor) {
+      const chunk = question.slice(cursor, pos.index).trim();
+      splitByWa(chunk).forEach((txt) =>
+        parts.push({ text: txt, intent: null })
+      );
     }
+
+    /* الجزء الذي يبدأ بالنيّة ذاتها ويليها كلمات */
+    const end = intentPositions[idx + 1]
+      ? intentPositions[idx + 1].index
+      : question.length;
+    const withIntent = question.slice(pos.index, end).trim();
+    splitByWa(withIntent).forEach((txt) =>
+      parts.push({ text: txt, intent: pos.intent })
+    );
+
+    cursor = end;
+  });
+
+  /* — B) ذيل الجملة بعد آخر نيّة إن وجد — */
+  if (cursor < question.length) {
+    splitByWa(question.slice(cursor).trim()).forEach((txt) =>
+      parts.push({ text: txt, intent: null })
+    );
+  }
+
+  /* 2) ضبط النيّة لأول كلمة مفتاحية بلا نيّة = «تعريف» */
+  if (parts.length && !parts[0].intent) {
+    parts[0].intent = "تعريف";
+  }
+
+  /* 3) وراثة النيّة إلى الأمام */
+  let lastIntent = null;
+  for (const p of parts) {
+    if (p.intent) lastIntent = p.intent;
+    else if (lastIntent) p.intent = lastIntent; // وراثة
+    else p.intent = "تعريف"; // احتياط
   }
 
   for (const part of parts) {
-    const context = extractContextFromPart(part.text, keywordsRaw);
-    const intent = part.intent;
-    const keyword = context?.keyword;
-    const type = context?.type || null;
-    const condition = context?.condition || [];
-    const place = context?.place || null;
-    let hasAvailable = "";
-    if (type) hasAvailable += `(${type})`;
-    if (place) hasAvailable += (hasAvailable ? "،" : "") + ` (${place})`;
-    if (condition && Array.isArray(condition) && condition.length > 0) {
-      hasAvailable += (hasAvailable ? "،" : "") + `  (${condition.join(", ")})`;
-    }
-    if (intent && keyword) {
-      const answers = loadAnswersForKeyword(keyword, remote, basePath);
-      const best = findBestAnswer(answers, intent, type, condition, place);
-      answersBundle.push({
-        question: `ما ${intent} ${keyword} ${hasAvailable} ؟`,
-        intent,
-        keyword,
-        type,
-        condition,
-        place,
-        answer: best.answer,
-        proof: best.proof,
-      });
-    } else {
-      // سؤال ناقص → مرّره إلى missingQ
-      const missing = handleMissingQ(part.text, basePath);
+    const ctx = extractContextFromPart(part.text, keywordsRaw);
 
+    if (!ctx) {
+      // لم نجد كلمة مفتاحية → استخدم missingQ
+      const missing = handleMissingQ(part.text, basePath);
       if (missing.intent && missing.keyword) {
-        const answers = loadAnswersForKeyword(
-          missing.keyword,
-          remote,
-          basePath
-        );
+        const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
         const best = findBestAnswer(
-          answers,
+          ansArr,
           missing.intent,
           missing.type,
           missing.condition,
           missing.place
         );
-
         answersBundle.push({
           question: part.text,
           intent: missing.intent,
@@ -254,24 +226,45 @@ function handleMultyQ(question, founds, basePath = "./data") {
           proof: best.proof,
         });
       } else {
-        // لم تكتمل الإجابة
         return {
           ask: missing.ask,
           message: missing.message,
           context: missing.context,
-          available: missing.available,
-          hold: answersBundle,
         };
       }
+    } else {
+      /* كلمة مفتاحية موجودة */
+      const { keyword, type, condition, place } = ctx;
+      const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
+      const best = findBestAnswer(ansArr, part.intent, type, condition, place);
+
+      answersBundle.push({
+        question: `ما ${part.intent} ${keyword}${type ? ` (${type})` : ""} ؟`,
+        intent: part.intent,
+        keyword,
+        type,
+        condition,
+        place,
+        answer: best.answer,
+        proof: best.proof,
+      });
     }
   }
 
+  /* 5) أعد النتائج */
   return {
     ask: "split",
     message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
     answers: answersBundle,
-    context: founds,
   };
+
+  /* ========= دالة مساعدة لفصل النص على «و» مع الحفاظ على الكلمات ========= */
+  function splitByWa(chunk) {
+    return chunk
+      .split(/(?:^|\s)و\s+/) // فصل عند الواو المعطوفة
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
 }
 
 module.exports = {

@@ -1,15 +1,17 @@
+/* =========================================================================
+   handleMissingQ.js – إصدار 27-05-2025  (Fix #7: exact-type preference)
+   ====================================================================== */
 const fs = require("fs");
 const path = require("path");
 
-let partialContext = {};
+let partialContext = {}; // يُخزّن السياق غير المكتمل بين الاستدعاءات
 
-/* =========== أدوات مساعدة =========== */
-function loadJSON(filePath) {
-  return JSON.parse(fs.readFileSync(filePath, "utf-8"));
+/* ───────── أدوات عامّة ───────── */
+function loadJSON(f) {
+  return JSON.parse(fs.readFileSync(f, "utf-8"));
 }
-
-function advancedSplit(text) {
-  const connectors = [
+function advancedSplit(t) {
+  const c = [
     "،",
     "؛",
     "\\.",
@@ -22,343 +24,348 @@ function advancedSplit(text) {
     "\\bقبل\\b",
     "\\bو\\b",
   ];
-  const regex = new RegExp(`\\s*(?:${connectors.join("|")})\\s*`, "gi");
-  return text
-    .split(regex)
-    .map((part) => part.trim())
-    .filter((part) => part.length > 2);
+  return t
+    .split(new RegExp(`\\s*(?:${c.join("|")})\\s*`, "gi"))
+    .map((p) => p.trim())
+    .filter((p) => p.length > 2);
+}
+function normalizeWithType(k, t) {
+  const clean = k.replace(/^ال/, "").trim();
+  const tt = t && !t.startsWith("ال") ? `ال${t}` : t;
+  return t ? `${clean} ${tt}` : `ال${clean}`;
+}
+function includesWord(txt, w) {
+  const esc = w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(
+    `(^|[\\s،؛؟.!"'()\\[\\]{}])${esc}($|[\\s،؛؟.!"'()\\[\\]{}])`,
+    "i"
+  );
+  return re.test(txt);
+}
+function questionHasKeyword(q, k, raw) {
+  if (!k) return false;
+  if (includesWord(q, k) || includesWord(q, k.replace(/^ال/, ""))) return true;
+  const vars = raw[k]?.variants || [];
+  return vars.some(
+    (v) => includesWord(q, v) || includesWord(q, v.replace(/^ال/, ""))
+  );
+}
+function detectKeywordInQuestion(q, raw) {
+  for (const k of Object.keys(raw)) if (questionHasKeyword(q, k, raw)) return k;
+  return null;
 }
 
-function normalizeWithType(keyword, type) {
-  const clean = keyword.replace(/^ال/, "").trim();
-  const cleanType = type && !type.startsWith("ال") ? `ال${type}` : type;
-  return type ? `${clean} ${cleanType}` : `ال${clean}`;
-}
-
-function extractFromContext(text, question, keywordsRaw) {
-  const lowered = text.toLowerCase();
-  const contextMatches = [];
-
-  for (const [keyword, data] of Object.entries(keywordsRaw)) {
+/* ───────── استخراج السياق من جزء ───────── */
+function extractFromContext(part, allText, kwRaw) {
+  const results = [];
+  for (const [kw, data] of Object.entries(kwRaw)) {
     const found = {
-      keyword,
+      keyword: kw,
       matchedBy: null,
       type: null,
       condition: null,
       place: null,
     };
 
-    /* ===== variant match ===== */
-    if (data.variants?.some((v) => lowered.includes(v.toLowerCase()))) {
+    /* (1) ذكر الكلمة المفتاحية نصًّا */
+    if (includesWord(part, kw) || includesWord(part, kw.replace(/^ال/, ""))) {
+      found.matchedBy = "keyword";
+    }
+
+    /* (2) المتغيّرات */
+    if (!found.matchedBy && data.variants?.some((v) => includesWord(part, v))) {
       found.matchedBy = "variant";
     }
 
-    /* ===== type match ===== */
+    /* (3) الأنواع – تفضيل المطابقة بالاسم نفسه */
     if (data.types) {
-      for (const [type, vals] of Object.entries(data.types)) {
-        if (
-          vals.some((v) =>
-            question.includes(v.toLowerCase())
-              ? question.includes(v.toLowerCase())
-              : lowered.includes(v.toLowerCase())
-          )
-        ) {
-          found.type = type;
-          found.matchedBy = found.matchedBy || "type";
+      let bestType = null;
+      let exactMatch = false;
+
+      for (const [t, vals] of Object.entries(data.types)) {
+        const nameMatch =
+          includesWord(allText, t) ||
+          includesWord(allText, t.replace(/^ال/, ""));
+        const valMatch =
+          !nameMatch && vals.some((v) => includesWord(allText, v));
+
+        if (nameMatch) {
+          bestType = t;
+          exactMatch = true;
+          break; // وجدنا النوع بالاسم نفسه ↠ لا حاجة للمزيد
         }
+        if (valMatch && !bestType) {
+          bestType = t; // احتفظ بأول تطابق بالـ vals إذا لم نجد اسماً
+        }
+      }
+
+      if (bestType) {
+        found.type = bestType;
+        found.matchedBy = found.matchedBy || "type";
       }
     }
 
-    /* ===== condition match ===== */
+    /* (4) الشروط */
     if (data.conditions) {
-      for (const [cond, vals] of Object.entries(data.conditions)) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+      for (const [c, vals] of Object.entries(data.conditions)) {
+        if (vals.some((v) => includesWord(part, v))) {
           found.condition ??= [];
-          found.condition.push(cond);
+          found.condition.push(c);
           found.matchedBy = found.matchedBy || "condition";
         }
       }
     }
 
-    /* ===== place match ===== */
+    /* (5) الأماكن */
     if (data.places) {
-      for (const [place, vals] of Object.entries(data.places)) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-          found.place = place;
+      for (const [p, vals] of Object.entries(data.places)) {
+        if (vals.some((v) => includesWord(part, v))) {
+          found.place = p;
           found.matchedBy = found.matchedBy || "place";
         }
       }
     }
 
-    if (found.matchedBy || found.type || found.condition || found.place) {
-      contextMatches.push(found);
-    }
+    if (found.matchedBy || found.type || found.condition || found.place)
+      results.push(found);
   }
-
-  return contextMatches;
+  return results;
 }
+const priority = (m) => ({ keyword: 4, variant: 3, type: 2 }[m.matchedBy] || 1);
 
-function extractAllIntents(text, intentsRaw) {
-  text = text.toLowerCase();
-  const foundIntents = [];
-
-  for (const [intent, obj] of Object.entries(intentsRaw)) {
+/* ───────── استخراج النوايا ───────── */
+function extractAllIntents(txt, intRaw) {
+  txt = txt.toLowerCase();
+  const arr = [];
+  for (const [intent, obj] of Object.entries(intRaw)) {
     for (const p of obj.patterns) {
-      const pattern = p
-        .toLowerCase()
-        .trim()
-        .replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      const regex = new RegExp(
-        `(^|[\\s،؛؟.!"'()\\[\\]{}])${pattern}($|[\\s،؛؟.!"'()\\[\\]{}])`,
+      const re = new RegExp(
+        `(^|[\\s،؛؟.!"'()\\[\\]{}])${p.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        )}($|[\\s،؛؟.!"'()\\[\\]{}])`,
         "i"
       );
-
-      const matched = regex.test(text);
-
-      if (matched) {
-        foundIntents.push(intent);
+      if (re.test(txt)) {
+        arr.push(intent);
         break;
       }
     }
   }
-
-  return foundIntents;
+  return arr;
 }
 
-function loadAnswersForKeyword(keyword, remote, basePath) {
-  const entry = remote.find(
-    (r) => r.keyword.toLowerCase() === keyword.toLowerCase()
-  );
-  if (!entry) return [];
-  const filePath = path.join(basePath, entry.file);
-  if (!fs.existsSync(filePath)) return [];
-  return loadJSON(filePath);
+/* ───────── تحميل الإجابات (مع Fallback) ───────── */
+function loadAnsForKW(k, remote, base) {
+  const e = remote.find((r) => r?.keyword?.toLowerCase() === k.toLowerCase());
+  if (!e) {
+    return [
+      { answers: [`عذرًا، لا تتوفر إجابة مفصّلة عن «${k}».`], proof: [] },
+    ];
+  }
+  const file = path.join(base, e.file);
+  if (!fs.existsSync(file)) {
+    return [
+      {
+        answers: [`عذرًا، تعذّر العثور على ملف الإجابات لـ «${k}».`],
+        proof: [],
+      },
+    ];
+  }
+  return loadJSON(file);
 }
-
-function findBestAnswer(answers, intent, type, condition, place) {
-  let best = null;
-  let bestScore = -1;
-
-  for (const entry of answers) {
-    let score = 0;
-    if (intent && entry.intent === intent) score++;
-    if (type && entry.type === type) score++;
-    if (condition) {
-      const userConds = Array.isArray(condition) ? condition : [condition];
-      const entryConds = Array.isArray(entry.condition)
-        ? entry.condition
-        : [entry.condition];
-      score += userConds.filter((c) => entryConds.includes(c)).length;
-    }
-    if (place) {
-      const placeMatch = Array.isArray(entry.place)
-        ? entry.place.includes(place)
-        : entry.place === place;
-      if (placeMatch) score++;
-    }
-    if (score > bestScore) {
-      best = entry;
-      bestScore = score;
-    }
+function bestAnswer(arr, intent, type, cond, place) {
+  // ❶ إذا وُجد intent صريح، صفِّف القائمة بحيث تأتي المطابقات أوّلاً
+  if (intent) {
+    arr = arr.sort(
+      (a, b) => (a.intent === intent ? -1 : 0) - (b.intent === intent ? -1 : 0)
+    );
   }
 
+  let best = null,
+    bestScore = -1;
+  for (const e of arr) {
+    let s = 0;
+    if (intent && e.intent === intent) s += 2; // أولوية أعلى
+    if (type && e.type === type) s++;
+    if (cond) {
+      const u = Array.isArray(cond) ? cond : [cond];
+      const en = Array.isArray(e.condition) ? e.condition : [e.condition];
+      s += u.filter((c) => en.includes(c)).length;
+    }
+    if (place) {
+      const ok = Array.isArray(e.place)
+        ? e.place.includes(place)
+        : e.place === place;
+      if (ok) s++;
+    }
+    if (s > bestScore) {
+      best = e;
+      bestScore = s;
+    }
+  }
   return best;
 }
 
-/* =========== الدالّة الرئيسة =========== */
-function handleMissingQ(question, matchedKeyword, basePath = "./data") {
-  const keywordsRaw = loadJSON(
-    path.join(basePath, "Q_structure/keywords.json")
-  );
-  const intentsRaw = loadJSON(path.join(basePath, "Q_structure/intent.json"));
+/* =======================================================================
+   الدالّة الرئيسة
+   ======================================================================= */
+function handleMissingQ(question, matchedKeyword = "", base = "./data") {
+  const kwRaw = loadJSON(path.join(base, "Q_structure/keywords.json"));
+  const intRaw = loadJSON(path.join(base, "Q_structure/intent.json"));
   const remote = loadJSON(path.join(__dirname, "remoteQuestion.json"));
 
-  const cleanedParts = advancedSplit(question.toLowerCase());
+  /* تغيّر الموضوع؟ */
+  const newKW = detectKeywordInQuestion(question, kwRaw);
+  if (partialContext.keyword && newKW && newKW !== partialContext.keyword) {
+    // أزل الكلمة المفتاحيّة القديمة فقط، واحتفظ بـ type / condition / place
+    delete partialContext.keyword;
+  }
 
-  /* --- النيّة --- */
-  const allIntents = extractAllIntents(question, intentsRaw);
-  const foundIntent = allIntents.length === 1 ? allIntents[0] : null;
-  if (foundIntent) partialContext.intent = foundIntent;
+  const parts = advancedSplit(question.toLowerCase());
+  const intents = extractAllIntents(question, intRaw);
+  if (intents.length === 1) partialContext.intent = intents[0];
 
-  let extractedIntent = partialContext.intent || null;
-  let fullContext = { ...partialContext };
+  let ctx = { ...partialContext };
+  let matches = [];
+  for (const p of parts)
+    matches = matches.concat(extractFromContext(p, question, kwRaw));
 
-  /* --- تحليل السياق --- */
-  let contextMatches = [];
-  for (const part of cleanedParts) {
-    const matches = extractFromContext(part, question, keywordsRaw);
-    contextMatches = contextMatches.concat(matches);
-
-    if (matches.length === 0) continue;
-
+  if (matches.length) {
+    matches.sort((a, b) => priority(b) - priority(a));
     const best = matches[0];
-
-    /* ==== متغيّرات الكلمة المفتاحيّة ==== */
-    const keywordVariants = keywordsRaw[best.keyword]?.variants || [];
-
-    /* ❶ تحقق من ذِكر الكلمة المفتاحية صراحة */
-    const rawKeyword = best.keyword.replace(/^ال/, "").trim();
-    const mentionedInQuestion =
-      question.includes(best.keyword) || question.includes(rawKeyword);
-
-    /* ❷ تحقق من متغيّرات حقيقية (تستثني الـ type نفسه) */
-    const variantMatch = keywordVariants.some((v) => {
-      const nV = v.replace(/^ال/, "").trim().toLowerCase();
-      const nType = (best.type || "").replace(/^ال/, "").trim().toLowerCase();
-      return nV !== nType && question.includes(v);
-    });
-
-    if (mentionedInQuestion || variantMatch) {
-      fullContext.keyword = best.keyword.startsWith("ال")
+    if (priority(best) >= 2) {
+      ctx.keyword = best.keyword.startsWith("ال")
         ? best.keyword
         : `ال${best.keyword}`;
     }
-
-    /* أضف type / condition / place */
-    fullContext.type ??= best.type;
-    fullContext.condition ??= best.condition;
-    fullContext.place ??= best.place;
+    ctx.type ??= best.type;
+    ctx.condition ??= best.condition;
+    ctx.place ??= best.place;
   }
 
-  /* --- تجهيز البدائل --- */
-  const uniqueKeywords = [...new Set(contextMatches.map((m) => m.keyword))];
-  const typeKeywordCombos = contextMatches
-    .map((m) => m.keyword)
-    .filter(Boolean);
-  const responseLogic = normalizeWithType(
-    fullContext?.keyword || "",
-    fullContext?.type || ""
-  );
-  // ✅ إذا تم ذكر أكثر من نية ولم تُذكر الكلمة المفتاحية
-  if (allIntents.length > 1 && !fullContext.keyword) {
+  /* منطق القرار */
+  const uniq = [...new Set(matches.map((m) => m.keyword))];
+  const combos = matches.map((m) => m.keyword).filter(Boolean);
+  const logicStr = normalizeWithType(ctx.keyword || "", ctx.type || "");
+  const hasKW = !!ctx.keyword,
+    hasInt = !!ctx.intent,
+    manyInt = intents.length > 1;
+
+  if (manyInt && !hasKW) {
     return {
       ask: "intent",
-      message: `ما الذي تشير إليه بخصوص (${allIntents.join(
-        "، "
-      )})؟ فقط أخبرني و سوف أجيبك على الفور.`,
+      message: `ما الذي تشير إليه بخصوص (${intents.join("، ")})؟`,
       available: { keyword: false, intent: true, context: true },
-      context: fullContext,
+      context: ctx,
     };
   }
-
-  // ✅ إذا تم ذكر نية واحدة فقط بدون كلمة مفتاحية
   if (
-    allIntents.length === 1 &&
-    !fullContext.keyword &&
+    !hasKW &&
+    intents.length === 1 &&
     question.trim().split(/\s+/).length <= 3
   ) {
-    const intent = allIntents[0];
+    const i = intents[0];
     return {
       ask: "keyword",
-      message: `ارى انك تريد معرفة ${intent} مسالة معينة فهل يمكنك توضيحها و سوف افيك بالجواب حالا , مثلا : ${intent} الصلاة , ${intent} الصيام... , إذا كنت تشير إلى شيء آخر، يرجى التوضيح.`,
+      message: `أي موضوع يخص «${i}» تقصده؟ مثل: ${i} الصلاة، ${i} الصيام…`,
       available: { keyword: false, intent: true, context: false },
-      context: fullContext,
+      context: ctx,
     };
   }
-
-  /* ❶ لا Keyword مُصرَّح + ≥1 مرشح ⇒ اسأل عن Keyword */
-  if (
-    !fullContext.keyword &&
-    uniqueKeywords.length > 1 &&
-    matchedKeyword === ""
-  ) {
-    partialContext = fullContext;
-
+  /* ← إزالة ‎!hasKW‎ لضمان طلب التوضيح عند تعدد الكلمات */
+  if (uniq.length > 1 && matchedKeyword === "") {
+    partialContext = ctx;
     return {
       ask: "keyword",
-      message: `سؤالك عن "${question}" يحتمل أكثر من موضوع :  ${typeKeywordCombos.join(
+      message: `سؤالك عن «${question}» يحتمل: ${combos.join(
         " أم "
-      )}. من فضلك حدّد أيّها تقصد.`,
-      available: { keyword: false, intent: !!extractedIntent, context: true },
-      context: fullContext,
+      )}. حدّد المطلوب.`,
+      available: { keyword: false, intent: hasInt, context: true },
+      context: ctx,
     };
   }
-  if ((!fullContext.keyword && uniqueKeywords.length === 1) || matchedKeyword) {
-    fullContext.keyword = matchedKeyword ? matchedKeyword : uniqueKeywords[0];
-    // Find the first match for this keyword to extract type/condition/place
-    const match = contextMatches.find((m) => m.keyword === fullContext.keyword);
-    let extra = "";
-    if (match) {
-      if (match.type) extra = ` (${match.type})`;
-      else if (match.condition)
-        extra = ` (${
-          Array.isArray(match.condition)
-            ? match.condition.join("، ")
-            : match.condition
-        })`;
-      else if (match.place) extra = ` (${match.place})`;
-    }
-    const isType = !fullContext.type ? extra : "";
-    partialContext = fullContext;
+  if (!hasKW && (uniq.length === 1 || matchedKeyword)) {
+    ctx.keyword = matchedKeyword || uniq[0];
+    const km = matches.find((m) => m.keyword === ctx.keyword) || {};
+    ctx.type ??= km.type;
+    ctx.condition ??= km.condition;
+    ctx.place ??= km.place;
+  }
+  if (hasKW && !hasInt) {
+    partialContext = ctx;
     return {
       ask: "intent",
-      message: `ما الذي تود معرفته بخصوص ${normalizeWithType(
-        fullContext.keyword || "",
-        fullContext.type || ""
-      )}${isType}؟ (مثال: حكم، تعريف...). يرجى تحديد النية.`,
-      keyword: fullContext.keyword,
+      message: `ما الذي تود معرفته بخصوص ${logicStr}؟ (حكم، تعريف، فضل، كيفية…)`,
+      keyword: ctx.keyword,
       available: { keyword: true, intent: false, context: true },
-      context: fullContext,
+      context: ctx,
     };
   }
-  /* ❷ Keyword موجودة لكن لا Intent ⇒ اسأل عن النيّة */
-  if (fullContext.keyword && !extractedIntent && uniqueKeywords.length === 1 && fullContext.intent === '') {
-    partialContext = fullContext;
-    return {
-      ask: "intent",
-      message: `ما الذي تود معرفته بخصوص ${responseLogic}؟ (مثال: حكم، تعريف...). يرجى التحديد  .`,
-      keyword: fullContext.keyword,
-      available: { keyword: true, intent: false, context: true },
-      context: fullContext,
-    };
-  }
-
-  /* ❸ لا Keyword ولا Intent ⇒ طلب توضيح عام */
-  if (!fullContext.keyword && !extractedIntent) {
-    partialContext = fullContext;
+  if (!hasKW && !hasInt) {
+    partialContext = ctx;
     return {
       ask: "clarify",
       message:
-        "لم أتمكن من تحديد النية أو الموضوع بدقة. هل يمكنك إعادة صياغة سؤالك أو توضيحه؟",
+        "نأسف لعدم توفر الإجابة على هذا السؤال حالياً، يرجى المحاولة لاحقاً.",
       available: { keyword: false, intent: false, context: false },
-      context: fullContext,
+      context: ctx,
     };
   }
 
-  /* --- البحث عن إجابة --- */
-  const answers = loadAnswersForKeyword(fullContext.keyword, remote, basePath);
-  const result = findBestAnswer(
+  /* البحث عن إجابة */
+  /* ========= إذا لم تُحدَّد النيّة وكان للـ keyword أكثر من نيّة ========= */
+  const answersAll = loadAnsForKW(ctx.keyword, remote, base);
+  if (!ctx.intent) {
+    const intentsAvailable = [
+      ...new Set(answersAll.map((a) => a.intent).filter(Boolean)),
+    ];
+
+    if (intentsAvailable.length > 1) {
+      partialContext = ctx; // احتفظ بالسياق
+      return {
+        ask: "intent",
+        message:
+          `لدي أكثر من إجابة ممكنة بخصوص ${ctx.keyword} ` +
+          `(${intentsAvailable.join("، ")}). حدِّد المطلوب.`,
+        available: { keyword: true, intent: false, context: true },
+        context: ctx,
+      };
+    }
+  }
+
+  const answers = loadAnsForKW(ctx.keyword, remote, base);
+  const best = bestAnswer(
     answers,
-    extractedIntent || fullContext?.intent || "",
-    fullContext.type,
-    fullContext.condition,
-    fullContext.place
+    ctx.intent || "",
+    ctx.type,
+    ctx.condition,
+    ctx.place
   );
+  partialContext = {};
 
-  partialContext = {}; // إعادة الضبط
-
-  if (result) {
+  if (best) {
     return {
-      intent: extractedIntent,
-      keyword: fullContext.keyword,
-      type: fullContext.type || null,
-      condition: fullContext.condition || null,
-      place: fullContext.place || null,
-      answer: Array.isArray(result.answers)
-        ? result.answers[Math.floor(Math.random() * result.answers.length)]
-        : result.answer,
-      ref: result.proof || [],
+      intent: ctx.intent,
+      keyword: ctx.keyword,
+      type: ctx.type || null,
+      condition: ctx.condition || null,
+      place: ctx.place || null,
+      answer: Array.isArray(best.answers)
+        ? best.answers[Math.floor(Math.random() * best.answers.length)]
+        : best.answer,
+      ref: best.proof || [],
       score: 1,
     };
   }
-
   return {
-    intent: extractedIntent,
-    keyword: fullContext.keyword,
-    type: fullContext.type || null,
-    condition: fullContext.condition || null,
-    place: fullContext.place || null,
-    answer: "لم أجد إجابة دقيقة لهذا السؤال.",
+    intent: ctx.intent,
+    keyword: ctx.keyword,
+    type: ctx.type || null,
+    condition: ctx.condition || null,
+    place: ctx.place || null,
+    answer:
+      "نأسف لعدم توفر الإجابة على هذا السؤال حالياً، يرجى المحاولة لاحقاً.",
     score: 0.6,
   };
 }

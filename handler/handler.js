@@ -9,16 +9,20 @@ function loadJSON(filePath) {
 
 function extractIntent(text, intentsRaw) {
   text = text.toLowerCase();
-  const intents = Object.entries(intentsRaw).map(([intent, obj]) => ({
-    intent,
-    patterns: obj.patterns,
-  }));
 
-  const matched = intents.find(({ patterns }) =>
-    patterns.some((p) => text.includes(p.toLowerCase()))
-  );
+  for (const [intent, obj] of Object.entries(intentsRaw)) {
+    for (let p of obj.patterns) {
+      p = p.toLowerCase().trim(); // أزل الفراغات الزائدة
+      const esc = p.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const re = new RegExp(
+        `(^|[\\s،؛؟.!"'()\\[\\]{}])${esc}($|[\\s،؛؟.!"'()\\[\\]{}])`,
+        "i"
+      );
 
-  return matched ? matched.intent : null;
+      if (re.test(text)) return intent; // أوّل تطابق يكفي
+    }
+  }
+  return null; // لا نيّة
 }
 
 function extractKeywordAndContext(text, keywordsRaw) {
@@ -40,7 +44,7 @@ function extractKeywordAndContext(text, keywordsRaw) {
 
     if (data.types) {
       for (const [type, vals] of Object.entries(data.types)) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+        if (vals?.some((v) => lowered.includes(v.toLowerCase()))) {
           found.type = type;
           if (!found.matchedBy) found.matchedBy = "type";
           break;
@@ -229,37 +233,69 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   const condition = matched.condition || previousContext.condition || null;
   const place = matched.place || previousContext.place || null;
 
-  // handle missing complex question
+  /* ========== handle missing complex question ========== */
   if (isMulty.state) {
-    // Check if the question is only one word (ignoring spaces)
     const isSingleWord = question.trim().split(/\s+/).length === 1;
-
+    const notMissingComplex = !previousContext.isMissing;
+    // لا نوايا صريحة، أكثر من كلمة مفتاحية، والجملة ليست كلمة واحدة
     if (
       isMulty.founds.foundIntents.size === 0 &&
       isMulty.founds.foundKeywords.size > 1 &&
-      question.length > 1 &&
-      !isSingleWord
+      !isSingleWord &&
+      notMissingComplex
     ) {
-      const definitionIntent = "تعريف"; // or use the intent name for "definition" in your intents file
+      const definitionIntent = "تعريف"; // نيّة التعريف
       const uniqueKeywords = [...isMulty.founds.foundKeywords];
+
       const definitions = uniqueKeywords.map((kw) => {
+        /* ❶ احصل على كل المطابقات لهذا الـ keyword لمعرفة النوع */
+        const kwMatchesForKw = keywordMatches.filter((m) => m.keyword === kw);
+
+        /* ❷ استخرج أوّل type مذكور مع هذا الـ keyword (إن وُجد) */
+        const typeForKw =
+          kwMatchesForKw.map((m) => m.type).filter(Boolean)[0] || null;
+
+        /* ❸ ابحث عن أفضل إجابة محدِّدًا الـ intent و الـ type */
         const answers = loadAnswersForKeyword(kw, remote, basePath);
-        const def = findBestAnswer(answers, definitionIntent, null, null, null);
+        const def = findBestAnswer(
+          answers,
+          definitionIntent,
+          typeForKw, // ← النوع المُكتشَف
+          null,
+          null
+        );
+
         return {
           keyword: kw,
           intent: definitionIntent,
+          type: typeForKw, // أعد النوع في الاستجابة
           answer: def
             ? Array.isArray(def.answers)
               ? def.answers[Math.floor(Math.random() * def.answers.length)]
               : def.answer
-            : "لم أجد تعريفًا لهذا المصطلح.",
-          ref: def && def.proof ? def.proof : [],
+            : `لم أجد تعريفًا لـ «${kw}».`,
+          ref: def?.proof || [],
           score: def ? 1 : 0.6,
         };
       });
+
       return { definitions };
     }
+    if (
+      isMulty.founds.foundIntents.size === 0 &&
+      isMulty.founds.foundKeywords.size > 1 &&
+      !isSingleWord &&
+      !notMissingComplex
+    ) {
+      structuredQ = "";
+      structuredQ = Array.from(isMulty.founds.foundKeywords)
+        .map((kw) => `${previousContext.lastIntent} ${kw}`)
+        .join(" و ");
+      const multiResult = handleMultyQ(structuredQ, isMulty.founds, basePath);
+      if (multiResult) return multiResult;
+    }
   }
+
   // handle simple missing question
   const parts = question
     .split(/\s+/)
@@ -299,7 +335,8 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
     type,
     condition,
     place,
-    answer: "لم أجد إجابة دقيقة لهذا السؤال.",
+    answer:
+      "نأسف لعدم توفر الإجابة على هذا السؤال حالياً، يرجى المحاولة لاحقاً.",
     score: 0.6,
   };
 }
