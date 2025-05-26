@@ -157,7 +157,7 @@ function extractAllIntents(txt, intRaw) {
 
 /* ───────── تحميل الإجابات (مع Fallback) ───────── */
 function loadAnsForKW(k, remote, base) {
-  const e = remote.find((r) => r?.keyword?.toLowerCase() === k.toLowerCase());
+  const e = remote?.find((r) => r?.keyword?.toLowerCase() === k?.toLowerCase());
   if (!e) {
     return [
       { answers: [`عذرًا، لا تتوفر إجابة مفصّلة عن «${k}».`], proof: [] },
@@ -210,7 +210,12 @@ function bestAnswer(arr, intent, type, cond, place) {
 /* =======================================================================
    الدالّة الرئيسة
    ======================================================================= */
-function handleMissingQ(question, matchedKeyword = "", base = "./data") {
+function handleMissingQ(
+  question,
+  matchedKeyword = "",
+  mayIntent,
+  base = "./data"
+) {
   const kwRaw = loadJSON(path.join(base, "Q_structure/keywords.json"));
   const intRaw = loadJSON(path.join(base, "Q_structure/intent.json"));
   const remote = loadJSON(path.join(__dirname, "remoteQuestion.json"));
@@ -263,7 +268,7 @@ function handleMissingQ(question, matchedKeyword = "", base = "./data") {
   if (
     !hasKW &&
     intents.length === 1 &&
-    question.trim().split(/\s+/).length <= 3
+    question.trim().split(/\s+/).length <= 1
   ) {
     const i = intents[0];
     return {

@@ -308,7 +308,7 @@ function findAnswer(question, previousContext = {}, basePath = "./data") {
   );
 
   if (!keyword || !intent) {
-    return handleMissingQ(question, matchedKeyword || "");
+    return handleMissingQ(question, matchedKeyword || "" ,"", basePath);
   }
 
   const answers = loadAnswersForKeyword(keyword, remote, basePath);

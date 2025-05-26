@@ -82,7 +82,7 @@
     "keyword": "الايمان",
     "type": "اليوم الاخر",
     "condition": [],
-    "answer": "اليوم الآخر هو مفهوم الآخرة الذي يشمل البعث والحساب والثواب والعقاب.",
+    "answer": "الايمان باليوم الآخر هو مفهوم الآخرة الذي يشمل البعث والحساب والثواب والعقاب.",
     "proof": [
       {
         "ref": "Reference not available",
@@ -93,14 +93,18 @@
   {
     "intent": "تعريف",
     "keyword": "الايمان",
-    "type": "القضاء والقدر",
+    "type": "القدر",
     "condition": [],
     "answer": "القضاء والقدر يشيران إلى علو علم الله وقدرته في تدبير شؤون الكون والإنسان.",
     "proof": [
       {
-        "ref": "Reference not available",
-        "url": ""
-      }
+        "ref": "Reference detail 1",
+        "url": "https://sunnah.com/sample1"
+          },
+          {
+        "ref": "Reference detail 2",
+        "url": "https://sunnah.com/sample2"
+          }
     ]
   }
 ]

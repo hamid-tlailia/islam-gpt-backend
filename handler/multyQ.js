@@ -205,7 +205,9 @@ function handleMultyQ(question, founds, basePath = "./data") {
 
     if (!ctx) {
       // لم نجد كلمة مفتاحية → استخدم missingQ
-      const missing = handleMissingQ(part.text, basePath);
+      const foundIntentsStr = [...founds.foundIntents].map(v => `${v}`).join(', ');
+      const isIntent = foundIntentsStr ? foundIntentsStr : null
+      const missing = handleMissingQ(part.text ,"",isIntent, basePath);
       if (missing.intent && missing.keyword) {
         const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
         const best = findBestAnswer(
@@ -234,17 +236,47 @@ function handleMultyQ(question, founds, basePath = "./data") {
       }
     } else {
       /* كلمة مفتاحية موجودة */
+      // 🟢 استخرج القيم من السياق
       const { keyword, type, condition, place } = ctx;
-      const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
-      const best = findBestAnswer(ansArr, part.intent, type, condition, place);
 
+      /// تُعيد نصًّا منزوع الفراغات أو "" إذا لم تكن القيمة String صافية
+      const clean = (v) =>
+        typeof v === "string"
+          ? v.trim() // ✔︎ سلسلة ⇒ نحذف الفراغات
+          : Array.isArray(v)
+          ? v.map(String).join(" ").trim() // مصفوفة ⇒ نحوّل العناصر ونضمّها
+          : ""; // أي شيء آخر ⇒ نعيد ""
+      // 🟢 تنظيف القيم
+      const cleanType = clean(type);
+      const cleanCondition = clean(condition);
+      const cleanPlace = clean(place);
+
+      // 🟢 اختَر أول قيمة غير فارغة لإدراجها بين القوسين
+      const extra = cleanType || cleanCondition || cleanPlace; // تُصبح "" إذا لم توجد أي قيمة
+
+      // 🟢 ابنِ جملة السؤال خالية من () الفارغة
+      const question = `ما ${part.intent} ${keyword}${
+        extra ? ` (${extra})` : ""
+      } ؟`;
+
+      // 🟢 حمّل الإجابات واختر أفضلها
+      const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
+      const best = findBestAnswer(
+        ansArr,
+        part.intent,
+        cleanType,
+        cleanCondition,
+        cleanPlace
+      );
+
+      // 🟢 خزّن كل شيء في الحزمة
       answersBundle.push({
-        question: `ما ${part.intent} ${keyword}${type ? ` (${type})` : ""} ؟`,
+        question,
         intent: part.intent,
         keyword,
-        type,
-        condition,
-        place,
+        type: cleanType || null, // نحفظ undefined إذا لم تكن هناك قيمة فعلية
+        condition: cleanCondition || null,
+        place: cleanPlace || null,
         answer: best.answer,
         proof: best.proof,
       });
