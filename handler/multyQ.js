@@ -47,39 +47,52 @@ function extractIntentPositions(text, intentsRaw) {
 
 function extractContextFromPart(text, keywordsRaw) {
   const lowered = text.toLowerCase();
+
+  let fallbackCtx = null; // يُستخدم إن لم تُذكر أي كلمة مفتاحية صريحة
+
   for (const [keyword, data] of Object.entries(keywordsRaw)) {
-    const all = [
-      keyword,
-      ...(data.variants || []),
+    const kwTerms = [keyword, ...(data.variants || [])];
+    const assocTerms = [
       ...Object.values(data.types || {}).flat(),
       ...Object.values(data.conditions || {}).flat(),
       ...Object.values(data.places || {}).flat(),
     ];
 
-    if (all.some((v) => lowered.includes(v.toLowerCase()))) {
-      const context = { keyword, type: null, condition: [], place: null };
+    const keywordPresent = kwTerms.some((t) =>
+      lowered.includes(t.toLowerCase())
+    );
+    const assocPresent = assocTerms.some((t) =>
+      lowered.includes(t.toLowerCase())
+    );
 
-      for (const [type, vals] of Object.entries(data.types || {})) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-          context.type = type;
-          break;
-        }
+    if (!keywordPresent && !assocPresent) continue; // لا ذكر صريح ولا ارتباط → تجاهل
+
+    // بناء السياق (كما في شيفرتك الأصلية)
+    const context = { keyword, type: null, condition: [], place: null };
+
+    for (const [type, vals] of Object.entries(data.types || {})) {
+      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+        context.type = type;
+        break;
       }
-      for (const [cond, vals] of Object.entries(data.conditions || {})) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-          context.condition.push(cond);
-        }
-      }
-      for (const [place, vals] of Object.entries(data.places || {})) {
-        if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-          context.place = place;
-          break;
-        }
-      }
-      return context;
     }
+    for (const [cond, vals] of Object.entries(data.conditions || {})) {
+      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+        context.condition.push(cond);
+      }
+    }
+    for (const [place, vals] of Object.entries(data.places || {})) {
+      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
+        context.place = place;
+        break;
+      }
+    }
+
+    if (keywordPresent) return context; // ← أولوية ➊: كلمة مفتاحية مذكورة
+    if (!fallbackCtx) fallbackCtx = context; // ← نحفَظ أول ارتباط كاحتياط
   }
-  return null;
+
+  return fallbackCtx; // قد يكون null إذا لم نجد شيئًا
 }
 
 function loadAnswersForKeyword(keyword, remote, basePath) {
@@ -194,6 +207,7 @@ function handleMultyQ(question, founds, basePath = "./data") {
 
   /* 3) وراثة النيّة إلى الأمام */
   let lastIntent = null;
+  let lastKeywordCtx = null; // سيحمل keyword + type/condition/place الأخيرة
   for (const p of parts) {
     if (p.intent) lastIntent = p.intent;
     else if (lastIntent) p.intent = lastIntent; // وراثة
@@ -201,13 +215,15 @@ function handleMultyQ(question, founds, basePath = "./data") {
   }
 
   for (const part of parts) {
-    const ctx = extractContextFromPart(part.text, keywordsRaw);
-
+    let ctx = extractContextFromPart(part.text, keywordsRaw);
+    if (!ctx && lastKeywordCtx) ctx = { ...lastKeywordCtx };
     if (!ctx) {
       // لم نجد كلمة مفتاحية → استخدم missingQ
-      const foundIntentsStr = [...founds.foundIntents].map(v => `${v}`).join(', ');
-      const isIntent = foundIntentsStr ? foundIntentsStr : null
-      const missing = handleMissingQ(part.text ,"",isIntent, basePath);
+      const foundIntentsStr = [...founds.foundIntents]
+        .map((v) => `${v}`)
+        .join(", ");
+      const isIntent = foundIntentsStr ? foundIntentsStr : null;
+      const missing = handleMissingQ(part.text, "", isIntent, basePath);
       if (missing.intent && missing.keyword) {
         const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
         const best = findBestAnswer(
@@ -238,7 +254,7 @@ function handleMultyQ(question, founds, basePath = "./data") {
       /* كلمة مفتاحية موجودة */
       // 🟢 استخرج القيم من السياق
       const { keyword, type, condition, place } = ctx;
-
+      lastKeywordCtx = ctx;
       /// تُعيد نصًّا منزوع الفراغات أو "" إذا لم تكن القيمة String صافية
       const clean = (v) =>
         typeof v === "string"
@@ -284,11 +300,32 @@ function handleMultyQ(question, founds, basePath = "./data") {
   }
 
   /* 5) أعد النتائج */
-  return {
-    ask: "split",
-    message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
-    answers: answersBundle,
-  };
+  /* ـــ إزالة التكرارات ــــــــــــــــــــــــــــــــــــــــــ */
+const unique = [];
+const seen = new Set();
+
+for (const a of answersBundle) {
+  const key = [
+    a.intent,
+    a.keyword,
+    a.type || "",
+    Array.isArray(a.condition) ? a.condition.join("|") : a.condition || "",
+    a.place || "",
+  ].join("|");
+
+  if (!seen.has(key)) {
+    seen.add(key);
+    unique.push(a);
+  }
+}
+
+/* 5) أعد النتائج */
+return {
+  ask: "split",
+  message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
+  answers: unique,     // ⟵ استخدم القائمة المصفّاة
+};
+
 
   /* ========= دالة مساعدة لفصل النص على «و» مع الحفاظ على الكلمات ========= */
   function splitByWa(chunk) {
