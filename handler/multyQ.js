@@ -157,15 +157,6 @@ function handleMultyQ(question, founds, basePath = "./data") {
 
   const answersBundle = [];
 
-  // توزيع intent حسب الموقع
-  /* ── ❶ أضِف الدالة أعلى الملف (أو في أي مكان قبل استخدامها) ───────── */
-  function adjustIntentForFirstKeyword(parts) {
-    // إذا كان أول مقطع لا يملك intent → اجعله "تعريف"
-    if (parts.length > 0 && !parts[0].intent) {
-      parts[0].intent = "تعريف";
-    }
-    return parts;
-  }
 
   /* ── ❷ بناء مصفوفة parts كما في كودك الحالي ────────────────────────── */
   const parts = [];
@@ -272,7 +263,7 @@ function handleMultyQ(question, founds, basePath = "./data") {
 
       // 🟢 ابنِ جملة السؤال خالية من () الفارغة
       const question = `ما ${part.intent} ${keyword}${
-        extra ? ` (${extra})` : ""
+        extra ? ` 【 ${extra} 】` : ""
       } ؟`;
 
       // 🟢 حمّل الإجابات واختر أفضلها
@@ -301,31 +292,30 @@ function handleMultyQ(question, founds, basePath = "./data") {
 
   /* 5) أعد النتائج */
   /* ـــ إزالة التكرارات ــــــــــــــــــــــــــــــــــــــــــ */
-const unique = [];
-const seen = new Set();
+  const unique = [];
+  const seen = new Set();
 
-for (const a of answersBundle) {
-  const key = [
-    a.intent,
-    a.keyword,
-    a.type || "",
-    Array.isArray(a.condition) ? a.condition.join("|") : a.condition || "",
-    a.place || "",
-  ].join("|");
+  for (const a of answersBundle) {
+    const key = [
+      a.intent,
+      a.keyword,
+      a.type || "",
+      Array.isArray(a.condition) ? a.condition.join("|") : a.condition || "",
+      a.place || "",
+    ].join("|");
 
-  if (!seen.has(key)) {
-    seen.add(key);
-    unique.push(a);
+    if (!seen.has(key)) {
+      seen.add(key);
+      unique.push(a);
+    }
   }
-}
 
-/* 5) أعد النتائج */
-return {
-  ask: "split",
-  message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
-  answers: unique,     // ⟵ استخدم القائمة المصفّاة
-};
-
+  /* 5) أعد النتائج */
+  return {
+    ask: "split",
+    message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
+    answers: unique, // ⟵ استخدم القائمة المصفّاة
+  };
 
   /* ========= دالة مساعدة لفصل النص على «و» مع الحفاظ على الكلمات ========= */
   function splitByWa(chunk) {
