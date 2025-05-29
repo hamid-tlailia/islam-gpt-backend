@@ -209,6 +209,13 @@ function findAnswer(question, prev = {}, base = "./data") {
     const r = handleMultyQ(question, founds, base);
     if (r) return r;
   }
+  if (A.intents.size > 1 && _lastCtx.keyword !== "") {
+    const q = Array.from(A.intents)
+      .map((intent) => `${intent} ${_lastCtx.keyword}`)
+      .join(" و "); // تفصلهم بواو (و) مثلا: "حكم الصيام و تعريف الصيام"
+    const r = handleMultyQ(q, "", base);
+    if (r) return r;
+  }
 
   /* — 4. Intentات متعددة → handleMultyQ */
   if (A.intents.size > 1) {
@@ -259,21 +266,21 @@ function findAnswer(question, prev = {}, base = "./data") {
   /* 6️⃣ خزّن السياق لأسئلة النية-فقط القادمة */
   _lastCtx = { keyword, type, condition, place };
 
-  const { ans, proof , label} = pickBest(
+  const { ans, proof, label } = pickBest(
     loadAns(keyword, remote, base),
     intent,
     type,
     condition,
     place
   );
-const isLabel = label !== null ? `${label} , ` : ""
+  const isLabel = label !== null ? `${label} , ` : "";
   return {
     intent,
     keyword,
     type,
     condition,
     place,
-    answer:isLabel +  ans,
+    answer: isLabel + ans,
     ref: proof,
     score: 1,
   };
