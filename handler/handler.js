@@ -26,15 +26,21 @@ function loadJSON(f) {
 /* ───────── استخراج جميع النيّات ───────── */
 
 function extractAllIntents(text, intRaw) {
-  const t = text.toLowerCase(),
-    arr = [];
-  for (const [intent, o] of Object.entries(intRaw))
-    for (const p of o.patterns)
+  const t = text.toLowerCase();
+  const arr = [];
+
+  for (const [intent, o] of Object.entries(intRaw)) {
+    for (const p of o.patterns) {
       if (hasWhole(t, p)) {
         arr.push(intent);
-        break;
+        break; // إذا أردت إظهار النية لمرة واحدة فقط، احتفظ بهذا
+        // لكن لحذف التكرار تمامًا، استخدم:
+        // if (!arr.includes(intent)) arr.push(intent);
       }
-  return arr; // مصفوفة نوايا (قد تكون فارغة)
+    }
+  }
+
+  return arr; // مصفوفة بجميع النوايا المتطابقة
 }
 
 /* ───────── استخراج Keyword + سياق مع index ───────── */
@@ -68,7 +74,8 @@ function extractKwCtx(text, kwRaw) {
     if (data.conditions)
       for (const [c, vals] of Object.entries(data.conditions))
         if (vals.some((v) => hasWhole(low, v))) conds.push(c);
-
+    // 🔥 أضف هنا استرجاع الـ label
+    const label = data.label || null;
     const push = (cond) =>
       res.push({
         keyword: kw,
@@ -77,6 +84,7 @@ function extractKwCtx(text, kwRaw) {
         place,
         idx: firstIdx,
         variant: hit,
+        label,
       });
 
     if (conds.length) conds.forEach(push);
@@ -129,6 +137,7 @@ function pickBest(arr, intent, type, cond, place) {
     ? {
         ans: Array.isArray(best.answers) ? best.answers[0] : best.answer || "",
         proof: best.proof || [],
+        label: best.label || null,
       }
     : { ans: "لم يتم العثور على إجابة دقيقة.", proof: [] };
 }
@@ -250,21 +259,21 @@ function findAnswer(question, prev = {}, base = "./data") {
   /* 6️⃣ خزّن السياق لأسئلة النية-فقط القادمة */
   _lastCtx = { keyword, type, condition, place };
 
-  const { ans, proof } = pickBest(
+  const { ans, proof , label} = pickBest(
     loadAns(keyword, remote, base),
     intent,
     type,
     condition,
     place
   );
-
+const isLabel = label !== null ? `${label} , ` : ""
   return {
     intent,
     keyword,
     type,
     condition,
     place,
-    answer: ans,
+    answer:isLabel +  ans,
     ref: proof,
     score: 1,
   };

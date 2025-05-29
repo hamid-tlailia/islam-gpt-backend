@@ -139,7 +139,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
           ? best.answers[0]
           : best.answer || "",
         proof: best.proof || [],
-        label : best.label || ""
+        label: best.label || "",
       }
     : { answer: "لم يتم العثور على إجابة دقيقة.", proof: [] };
 }
@@ -157,7 +157,6 @@ function handleMultyQ(question, founds, basePath = "./data") {
   if (intentPositions.length === 0) return null;
 
   const answersBundle = [];
-
 
   /* ── ❷ بناء مصفوفة parts كما في كودك الحالي ────────────────────────── */
   const parts = [];
@@ -260,7 +259,14 @@ function handleMultyQ(question, founds, basePath = "./data") {
       const cleanPlace = clean(place);
 
       // 🟢 اختَر أول قيمة غير فارغة لإدراجها بين القوسين
-      const extra = cleanType || cleanCondition || cleanPlace; // تُصبح "" إذا لم توجد أي قيمة
+      // Assume cleanType, cleanCondition, and cleanPlace are strings (can be empty or contain values)
+      const items = [cleanType, cleanCondition, cleanPlace];
+
+      // Filter out empty or whitespace-only values
+      const filteredItems = items.filter((item) => item && item.trim() !== "");
+
+      // Join them with " , " separator
+      const extra = filteredItems.join(" , ");
 
       // 🟢 ابنِ جملة السؤال خالية من () الفارغة
       const question = `ما ${part.intent} ${keyword}${
@@ -276,10 +282,12 @@ function handleMultyQ(question, founds, basePath = "./data") {
         condition,
         cleanPlace
       );
-const isLable = lowered
-  .split(/\s*و\s+/)
-  .some((part) => part.includes("هل يجوز"));
-
+      const isLable = lowered
+        .split(/\s*و\s+/)
+        .some((part) => part.includes("هل يجوز"));
+      const label = isLable
+        ? best.label && (best.label === "نعم" ? "نعم , " : "لا , ")
+        : "";
       // 🟢 خزّن كل شيء في الحزمة
       answersBundle.push({
         question,
@@ -288,7 +296,7 @@ const isLable = lowered
         type: cleanType || null, // نحفظ undefined إذا لم تكن هناك قيمة فعلية
         condition: condition || null,
         place: cleanPlace || null,
-        answer: isLable ? best.label + " , " + best.answer : best.answer,
+        answer: label + best.answer,
         proof: best.proof,
       });
     }
