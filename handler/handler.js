@@ -88,12 +88,13 @@ function extractKwCtx(text, kwRaw) {
 /* ───────── فلترة الكلمات المتضمَّنة ───────── */
 
 function filterSub(arr) {
-return arr.filter((m, i) => {
-    return !arr.some((o, j) =>
-      i !== j &&
-      o.variant === m.variant &&        // ← نفس الـ variant بالضبط
-      // لو كان أحدهما keyword مطابق للـ variant فأبقِه وازل الآخر.
-      (o.keyword === o.variant ? m.keyword !== m.variant : j < i)
+  return arr.filter((m, i) => {
+    return !arr.some(
+      (o, j) =>
+        i !== j &&
+        o.variant === m.variant && // ← نفس الـ variant بالضبط
+        // لو كان أحدهما keyword مطابق للـ variant فأبقِه وازل الآخر.
+        (o.keyword === o.variant ? m.keyword !== m.variant : j < i)
     );
   });
 }
@@ -168,7 +169,7 @@ function findAnswer(question, prev = {}, base = "./data") {
   }
 
   /* — 2. لا Intent + >1 Keyword → definitions */
-  if (A.intents.size === 0 && A.pairs.size > 1 ) {
+  if (A.intents.size === 0 && A.pairs.size > 1) {
     console.log("تعريفات متعددة:", A.pairs);
     // إذا كان هناك أكثر من Keyword، نبحث عن تعريفات لكل منها
     const defs = A.kwCtx.map((o) => {

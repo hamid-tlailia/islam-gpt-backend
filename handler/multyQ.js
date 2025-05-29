@@ -139,6 +139,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
           ? best.answers[0]
           : best.answer || "",
         proof: best.proof || [],
+        label : best.label || ""
       }
     : { answer: "لم يتم العثور على إجابة دقيقة.", proof: [] };
 }
@@ -272,9 +273,12 @@ function handleMultyQ(question, founds, basePath = "./data") {
         ansArr,
         part.intent,
         cleanType,
-        cleanCondition,
+        condition,
         cleanPlace
       );
+const isLable = lowered
+  .split(/\s*و\s+/)
+  .some((part) => part.includes("هل يجوز"));
 
       // 🟢 خزّن كل شيء في الحزمة
       answersBundle.push({
@@ -282,9 +286,9 @@ function handleMultyQ(question, founds, basePath = "./data") {
         intent: part.intent,
         keyword,
         type: cleanType || null, // نحفظ undefined إذا لم تكن هناك قيمة فعلية
-        condition: cleanCondition || null,
+        condition: condition || null,
         place: cleanPlace || null,
-        answer: best.answer,
+        answer: isLable ? best.label + " , " + best.answer : best.answer,
         proof: best.proof,
       });
     }

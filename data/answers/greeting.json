@@ -8,6 +8,14 @@
     "proof": []
   },
   {
+    "intent": "الشكر",
+    "keyword": "المفتي",
+    "type": null,
+    "condition": [],
+    "answer": "على الرحب و السعة، أنا هنا لمساعدتك في أي استفسار ديني.",
+    "proof": []
+  },
+  {
     "intent": "تعريف",
     "keyword": "المفتي",
     "type": null,
