@@ -153,6 +153,50 @@ function analyze(text, intRaw, kwRaw) {
   console.log("Intents:", intents, "Keywords Context:", kwCtx, "Pairs:", pairs);
   return { intents, kwCtx, pairs };
 }
+function extractIntentsAfterKeyword(text, intRaw, kwRaw) {
+  const t = text.toLowerCase();
+  const found = [];
+
+  // ابحث عن أقرب كلمة مفتاحية (من kwRaw)
+  let minKeywordIndex = -1;
+  let foundKeyword = null;
+  for (const [kw, data] of Object.entries(kwRaw)) {
+    const variants = [kw, ...(data.variants || [])];
+    for (const v of variants) {
+      const idx = t.indexOf(v.toLowerCase());
+      if (idx !== -1 && (minKeywordIndex === -1 || idx < minKeywordIndex)) {
+        minKeywordIndex = idx;
+        foundKeyword = v;
+      }
+    }
+  }
+
+  if (minKeywordIndex === -1) {
+    console.log(`❌ لم يتم العثور على أي كلمة مفتاحية في النص.`);
+    return found;
+  }
+
+  // ابحث عن جميع intents التي تأتي بعد هذه الكلمة
+  for (const [intent, o] of Object.entries(intRaw)) {
+    for (const p of o.patterns) {
+      const regex = new RegExp(
+        `(?<![\\p{L}])(?:ال)?${escape(p.trim().toLowerCase())}(?![\\p{L}])`,
+        "iu"
+      );
+      const match = regex.exec(t);
+      if (match && match.index > minKeywordIndex) {
+        found.push({
+          intent,
+          index: match.index,
+          keyword: foundKeyword,
+          keywordIndex: minKeywordIndex,
+        });
+      }
+    }
+  }
+
+  return found; // مصفوفة [{ intent, index, keyword, keywordIndex }]
+}
 
 /* =========================================================
    findAnswer
@@ -164,7 +208,37 @@ function findAnswer(question, prev = {}, base = "./data") {
   const remote = loadJSON(path.join(__dirname, "remoteQuestion.json"));
 
   const A = analyze(question, intRaw, kwRaw);
+  function isKeywordFirstAndAllIntentsAfter(result) {
+    if (!result || result.length === 0) return false;
 
+    // احصل على أول keyword وموقعها
+    const keywordIndex = result[0].keywordIndex;
+
+    // تحقق أن جميع intents تأتي بعد keyword
+    const allAfterKeyword = result.every(({ index }) => index > keywordIndex);
+
+    // هل يوجد intent واحد على الأقل؟
+    const hasAtLeastOneIntent = result.length > 0;
+
+    return hasAtLeastOneIntent && allAfterKeyword;
+  }
+
+  // 👇 مثال الاستخدام
+  const result = extractIntentsAfterKeyword(question, intRaw, kwRaw);
+  if (isKeywordFirstAndAllIntentsAfter(result)) {
+    console.log("✅ الكلمة المفتاحية موجودة أولاً وكل intents بعدها.");
+    // نفّذ المنطق الخاص بك (مثلاً: مشاركة الكلمة مع جميع intents وتمريرها لـ handleMultyQ)
+    const sharedKeyword = result[0].keyword;
+    const sharedIntents = result.map((r) => r.intent);
+    const founds = {
+      foundIntents: new Set(sharedIntents),
+      foundKeywords: new Set([sharedKeyword]),
+    };
+    const r = handleMultyQ(question, founds, base);
+    if (r) return r;
+  } else {
+    console.log("❌ الشرط غير متحقق.");
+  }
   /* — 1. لا Keyword إطلاقًا → جرّب وراثة آخر Keyword محفوظ */
   if (A.kwCtx.length === 0) {
     if (_lastCtx) {
@@ -209,6 +283,7 @@ function findAnswer(question, prev = {}, base = "./data") {
     const r = handleMultyQ(question, founds, base);
     if (r) return r;
   }
+  // Hnadle multy intents for 1 keyword
   if (A.intents.size > 1 && _lastCtx.keyword !== "") {
     const q = Array.from(A.intents)
       .map((intent) => `${intent} ${_lastCtx.keyword}`)
