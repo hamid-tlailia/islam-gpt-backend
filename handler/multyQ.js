@@ -205,73 +205,200 @@ function handleMultyQ(question, founds,pairs, basePath = "./data") {
     else p.intent = "تعريف"; // احتياط
   }
 
-for (const part of parts) {
-  let ctx = extractContextFromPart(part.text, keywordsRaw);
-  const loweredPartText = part.text.toLowerCase();
 
-  if (!ctx && lastKeywordCtx) {
-    // 🔥 استخدم kwCtx الأصلي من analyze بدلاً من البحث اليدوي
-    ctx = A.kwCtx.find(kc => kc.keyword === lastKeywordCtx.keyword) || { ...lastKeywordCtx };
-  }
-
-  if (!ctx) {
-    const foundIntentsStr = [...founds.foundIntents].join(", ");
-    const isIntent = foundIntentsStr || null;
-    const missing = handleMissingQ(part.text, "", isIntent, basePath);
-    if (missing.intent && missing.keyword) {
-      const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
-      const best = findBestAnswer(ansArr, missing.intent, missing.type, missing.condition, missing.place);
-      answersBundle.push({
-        question: part.text,
-        intent: missing.intent,
-        keyword: missing.keyword,
-        type: missing.type,
-        condition: missing.condition,
-        place: missing.place,
-        answer: best.answer,
-        proof: best.proof,
-      });
+ for (const part of parts) {
+  
+    let ctx = extractContextFromPart(part.text, keywordsRaw);
+  
+    if (!ctx && lastKeywordCtx) ctx = { ...lastKeywordCtx };
+  
+    if (!ctx) {    
+  
+      // لم نجد كلمة مفتاحية → استخدم missingQ
+  
+      const foundIntentsStr = [...founds.foundIntents]
+  
+        .map((v) => `${v}`)
+  
+        .join(", ");
+  
+      const isIntent = foundIntentsStr ? foundIntentsStr : null;
+  
+      const missing = handleMissingQ(part.text, "", isIntent, basePath);
+  
+      if (missing.intent && missing.keyword) {
+  
+        const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
+  
+        const best = findBestAnswer(
+  
+          ansArr,
+  
+          missing.intent,
+  
+          missing.type,
+  
+          missing.condition,
+  
+          missing.place
+  
+        );
+  
+        answersBundle.push({
+  
+          question: part.text,
+  
+          intent: missing.intent,
+  
+          keyword: missing.keyword,
+  
+          type: missing.type,
+  
+          condition: missing.condition,
+  
+          place: missing.place,
+  
+          answer: best.answer,
+  
+          proof: best.proof,
+  
+        });
+  
+      } else {
+  
+        return {
+  
+          ask: missing.ask,
+  
+          message: missing.message,
+  
+          context: missing.context,
+  
+        };
+  
+      }
+  
     } else {
-      return {
-        ask: missing.ask,
-        message: missing.message,
-        context: missing.context,
-      };
+  
+      /* كلمة مفتاحية موجودة */
+  
+      // 🟢 استخرج القيم من السياق
+  
+      const { keyword, type, condition, place } = ctx;
+  
+      
+  
+      lastKeywordCtx = ctx;
+  
+      /// تُعيد نصًّا منزوع الفراغات أو "" إذا لم تكن القيمة String صافية
+  
+      const clean = (v) =>
+  
+        typeof v === "string"
+  
+          ? v.trim() // ✔︎ سلسلة ⇒ نحذف الفراغات
+  
+          : Array.isArray(v)
+  
+          ? v.map(String).join(" ").trim() // مصفوفة ⇒ نحوّل العناصر ونضمّها
+  
+          : ""; // أي شيء آخر ⇒ نعيد ""
+  
+      // 🟢 تنظيف القيم
+  
+      const cleanType = clean(type);
+  
+      const cleanCondition = clean(condition);
+  
+      const cleanPlace = clean(place);
+  
+
+  
+      // 🟢 اختَر أول قيمة غير فارغة لإدراجها بين القوسين
+  
+      // Assume cleanType, cleanCondition, and cleanPlace are strings (can be empty or contain values)
+  
+      const items = [cleanType, cleanCondition, cleanPlace];
+  
+
+  
+      // Filter out empty or whitespace-only values
+  
+      const filteredItems = items.filter((item) => item && item.trim() !== "");
+  
+
+  
+      // Join them with " , " separator
+  
+      const extra = filteredItems.join(" , ");
+  
+
+  
+      // 🟢 ابنِ جملة السؤال خالية من () الفارغة
+  
+      const question = `ما ${part.intent} ${keyword}${
+  
+        extra ? ` 【 ${extra} 】` : ""
+  
+      } ؟`;
+  
+
+  
+      // 🟢 حمّل الإجابات واختر أفضلها
+  
+      const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
+  
+      const best = findBestAnswer(
+  
+        ansArr,
+  
+        part.intent,
+  
+        cleanType,
+  
+        condition,
+  
+        cleanPlace
+  
+      );
+  
+      const isLable = lowered
+  
+        .split(/\s*و\s+/)
+  
+        .some((part) => part.includes("هل يجوز"));
+  
+      const label = isLable
+  
+        ? best.label && (best.label === "نعم" ? "نعم , " : "لا , ")
+  
+        : "";
+  
+      // 🟢 خزّن كل شيء في الحزمة
+  
+      answersBundle.push({
+  
+        question,
+  
+        intent: part.intent,
+  
+        keyword,
+  
+        type: cleanType || null, // نحفظ undefined إذا لم تكن هناك قيمة فعلية
+  
+        condition: condition || null,
+  
+        place: cleanPlace || null,
+  
+        answer: label + best.answer,
+  
+        proof: best.proof,
+  
+      });
+  
     }
-  } else {
-    const { keyword, type, condition, place } = ctx;
-    lastKeywordCtx = ctx;
-
-    const clean = v =>
-      Array.isArray(v) ? v.join(" , ") :
-      (typeof v === "string" ? v.trim() : "");
-
-    const cleanType = clean(type);
-    const cleanCondition = clean(condition);
-    const cleanPlace = clean(place);
-    const items = [cleanType, cleanCondition, cleanPlace].filter(item => item && item.trim() !== "");
-    const extra = items.join(" , ");
-
-    const question = `ما ${part.intent} ${keyword}${extra ? ` 【 ${extra} 】` : ""} ؟`;
-    const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
-    const best = findBestAnswer(ansArr, part.intent, type, condition, place);
-
-    const isLabel = lowered.split(/\s*و\s+/).some(p => p.includes("هل يجوز"));
-    const label = isLabel ? (best.label === "نعم" ? "نعم , " : best.label === "لا" ? "لا , " : "") : "";
-
-    answersBundle.push({
-      question,
-      intent: part.intent,
-      keyword,
-      type: type || null, // احتفظ بالقائمة
-      condition: condition || null, // احتفظ بالقائمة
-      place: place || null,
-      answer: label + best.answer,
-      proof: best.proof,
-    });
+  
   }
-}
-
 
   /* 5) أعد النتائج */
   /* ـــ إزالة التكرارات ــــــــــــــــــــــــــــــــــــــــــ */
