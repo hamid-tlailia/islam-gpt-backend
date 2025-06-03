@@ -29,7 +29,7 @@ function correctTypos(input) {
 
     // 2️⃣ إذا فشل Typo-js، ننتقل إلى didyoumean2
     const match = didYouMean(word, vocab, {
-      threshold: 0.4,
+      threshold: 1,
       returnFirstMatch: true,
     });
     return match || word; // إما التصحيح أو نفس الكلمة
