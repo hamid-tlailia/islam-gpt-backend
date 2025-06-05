@@ -91,7 +91,7 @@ function extractContextFromPart(text, keywordsRaw) {
     if (keywordPresent) return context; // ← أولوية ➊: كلمة مفتاحية مذكورة
     if (!fallbackCtx) fallbackCtx = context; // ← نحفَظ أول ارتباط كاحتياط
   }
-
+console.log("From multy : " , fallbackCtx);
   return fallbackCtx; // قد يكون null إذا لم نجد شيئًا
 }
 
