@@ -7,20 +7,24 @@ function loadJSON(filePath) {
   return JSON.parse(fs.readFileSync(filePath, "utf-8"));
 }
 
-function escapeAndFlexPattern(p) {
-  return p
-    .trim()
-    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
-    .replace(/\s+/g, "\\s*");
+/* util: حوِّل النمط إلى “كلمة كاملة” مع مرونة المسافات */
+function wholePattern(pattern) {
+  // 1) اهرب جميع المحارف الخاصة
+  const esc = pattern.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  // 2) اجعل المسافات اختيارية (مثل escapeAndFlexPattern لديك)
+  const flex = esc.replace(/\s+/g, "\\s*");
+  // 3) أضف حدود الكلمة العربية مع السماح بـ (ال)
+  return `(?<![\\p{L}])(?:ال)?${flex}(?![\\p{L}])`;
 }
 
+/* — النسخة المنقَّحة من extractIntentPositions — */
 function extractIntentPositions(text, intentsRaw) {
   const lowered = text.toLowerCase();
   const positions = [];
 
   for (const [intent, data] of Object.entries(intentsRaw)) {
     for (const pattern of data.patterns) {
-      const regex = new RegExp(escapeAndFlexPattern(pattern), "gi");
+      const regex = new RegExp(wholePattern(pattern), "giu"); // ⬅︎
       let match;
       while ((match = regex.exec(lowered)) !== null) {
         positions.push({
@@ -33,6 +37,7 @@ function extractIntentPositions(text, intentsRaw) {
     }
   }
 
+  /* إزالة التداخل كما فى كودك الأصلى */
   positions.sort((a, b) => a.index - b.index);
   const filtered = [];
   let lastEnd = -1;
@@ -42,57 +47,99 @@ function extractIntentPositions(text, intentsRaw) {
       lastEnd = p.index + p.length;
     }
   }
+  console.log("intents filtred :", filtered);
   return filtered;
 }
 
+/* util: هل تحتوى الـ text على كلّ كلمات pattern (بأى ترتيب)؟ */
+function hasAllWords(text, phrase) {
+  return phrase
+    .split(/\s+/) // ⇦ فصّل العبارة إلى كلمات
+    .every((w) => text.includes(w.toLowerCase()));
+}
+
+/* util: أطول عنصر فريد */
+function pickLongest(arr = []) {
+  if (!arr.length) return null;
+  const uniq = [...new Set(arr)];
+  return uniq.reduce((a, b) => (b.length > a.length ? b : a));
+}
+
+/* النسخة المصحَّحة */
+/* util ─ اختيار أطول عنصر فريد */
+function pickLongest(arr = []) {
+  if (!arr.length) return null;
+  const uniq = [...new Set(arr)];
+  return uniq.reduce((a, b) => (b.length > a.length ? b : a));
+}
+
+/* util ─ هل تظهر جميع كلمات pattern فى text؟ (ترتيب حرّ) */
+function matchPattern(text, pattern) {
+  const p = pattern.toLowerCase().trim();
+  if (text.includes(p)) return true; // تطابق حرفىّ
+  const words = p.split(/\s+/);
+  return words.every((w) => text.includes(w));
+}
+
+/* ── النسخة الديناميّة من extractContextFromPart ───────── */
 function extractContextFromPart(text, keywordsRaw) {
   const lowered = text.toLowerCase();
-
-  let fallbackCtx = null; // يُستخدم إن لم تُذكر أي كلمة مفتاحية صريحة
+  let fallbackCtx = null;
 
   for (const [keyword, data] of Object.entries(keywordsRaw)) {
+    /* 1️⃣ هل ذُكرت الكلمة المفتاحيّة صراحةً؟ */
     const kwTerms = [keyword, ...(data.variants || [])];
-    const assocTerms = [
-      ...Object.values(data.types || {}).flat(),
-      ...Object.values(data.conditions || {}).flat(),
-      ...Object.values(data.places || {}).flat(),
-    ];
+    const hasKeyword = kwTerms.some((t) => lowered.includes(t.toLowerCase()));
 
-    const keywordPresent = kwTerms.some((t) =>
-      lowered.includes(t.toLowerCase())
-    );
-    const assocPresent = assocTerms.some((t) =>
-      lowered.includes(t.toLowerCase())
-    );
+    /* 2️⃣ تجميع المطابقات */
+    const tHits = [],
+      cHits = [],
+      pHits = [];
 
-    if (!keywordPresent && !assocPresent) continue; // لا ذكر صريح ولا ارتباط → تجاهل
-
-    // بناء السياق (كما في شيفرتك الأصلية)
-    const context = { keyword, type: null, condition: [], place: null };
-
-    for (const [type, vals] of Object.entries(data.types || {})) {
-      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-        context.type = type;
-        break;
-      }
-    }
-    for (const [cond, vals] of Object.entries(data.conditions || {})) {
-      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-        context.condition.push(cond);
-      }
-    }
-    for (const [place, vals] of Object.entries(data.places || {})) {
-      if (vals.some((v) => lowered.includes(v.toLowerCase()))) {
-        context.place = place;
-        break;
-      }
+    // ⬤ types
+    for (const [typ, pats] of Object.entries(data.types || {})) {
+      const hit = [typ, ...pats].some((p) => matchPattern(lowered, p));
+      if (hit) tHits.push(typ);
     }
 
-    if (keywordPresent) return context; // ← أولوية ➊: كلمة مفتاحية مذكورة
-    if (!fallbackCtx) fallbackCtx = context; // ← نحفَظ أول ارتباط كاحتياط
+    // ⬤ conditions
+    for (const [cond, pats] of Object.entries(data.conditions || {})) {
+      const hit = pats.some((p) => matchPattern(lowered, p));
+      if (hit) cHits.push(cond);
+    }
+
+    // ⬤ places
+    for (const [plc, pats] of Object.entries(data.places || {})) {
+      const hit = pats.some((p) => matchPattern(lowered, p));
+      if (hit) pHits.push(plc);
+    }
+
+    /* 3️⃣ إذا لم نجد أيّ ارتباط → انتقل للـ keyword التالية */
+    if (!hasKeyword && !tHits.length && !cHits.length && !pHits.length)
+      continue;
+
+    /* 4️⃣ أزل التداخل (condition يتغلّب على type عند التكرار) */
+    const uniqCond = cHits.filter((c) => !tHits.includes(c));
+    const uniqType = tHits.filter((t) => !cHits.includes(t));
+
+    /* 5️⃣ اختر الأطول */
+    const chosenCond = pickLongest(uniqCond);
+    const chosenType = chosenCond ? null : pickLongest(uniqType);
+
+    const ctx = {
+      keyword,
+      type: chosenType,
+      condition: chosenCond,
+      place: pickLongest(pHits) || null,
+    };
+
+    /* 6️⃣ إذا وُجدت الكلمة المفتاحيّة صراحةً فارجع فورًا */
+    if (hasKeyword) return ctx;
+
+    /* 7️⃣ وإلاّ خزّنه كاحتمال احتياطىّ */
+    if (!fallbackCtx) fallbackCtx = ctx;
   }
-console.log("From multy : " , fallbackCtx);
-  return fallbackCtx; // قد يكون null إذا لم نجد شيئًا
+  return fallbackCtx; // قد تكون null
 }
 
 function loadAnswersForKeyword(keyword, remote, basePath) {
@@ -144,7 +191,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
     : { answer: "لم يتم العثور على إجابة دقيقة.", proof: [] };
 }
 
-function handleMultyQ(question, founds,pairs, basePath = "./data") {
+function handleMultyQ(question, founds, pairs, basePath = "./data") {
   const intentsRaw = loadJSON(path.join(basePath, "Q_structure/intent.json"));
   const keywordsRaw = loadJSON(
     path.join(basePath, "Q_structure/keywords.json")
@@ -191,213 +238,177 @@ function handleMultyQ(question, founds,pairs, basePath = "./data") {
     );
   }
 
-  /* 2) ضبط النيّة لأول كلمة مفتاحية بلا نيّة = «تعريف» */
+  /* 2) ضبط النيّة لأول جزء بلا نيّة */
+  /* — 2) ضبط النيّة لأول جزء بلا نيّة — */
+  const defaultIntent = [...(founds?.foundIntents || [])][0] || "حكم";
   if (parts.length && !parts[0].intent) {
-    parts[0].intent = "تعريف";
+    parts[0].intent = defaultIntent;
   }
 
-  /* 3) وراثة النيّة إلى الأمام */
+  /* — 3) وراثة النيّة إلى الأمام — */
   let lastIntent = null;
-  let lastKeywordCtx = null; // سيحمل keyword + type/condition/place الأخيرة
   for (const p of parts) {
-    if (p.intent) lastIntent = p.intent;
-    else if (lastIntent) p.intent = lastIntent; // وراثة
-    else p.intent = "تعريف"; // احتياط
+    if (p.intent) {
+      lastIntent = p.intent; // نيّة صريحة
+    } else if (lastIntent) {
+      p.intent = lastIntent; // وراثة
+    } else {
+      p.intent = defaultIntent; // ← fallback موحَّد
+      lastIntent = defaultIntent;
+    }
   }
 
-
- for (const part of parts) {
-  
+  for (const part of parts) {
     let ctx = extractContextFromPart(part.text, keywordsRaw);
-  
+    console.log("Parts : ", parts);
     if (!ctx && lastKeywordCtx) ctx = { ...lastKeywordCtx };
-  
-    if (!ctx) {    
-  
+
+    if (!ctx) {
       // لم نجد كلمة مفتاحية → استخدم missingQ
-  
+
       const foundIntentsStr = [...founds.foundIntents]
-  
+
         .map((v) => `${v}`)
-  
+
         .join(", ");
-  
+
       const isIntent = foundIntentsStr ? foundIntentsStr : null;
-  
+
       const missing = handleMissingQ(part.text, "", isIntent, basePath);
-  
+
       if (missing.intent && missing.keyword) {
-  
         const ansArr = loadAnswersForKeyword(missing.keyword, remote, basePath);
-  
+
         const best = findBestAnswer(
-  
           ansArr,
-  
+
           missing.intent,
-  
+
           missing.type,
-  
+
           missing.condition,
-  
+
           missing.place
-  
         );
-  
+
         answersBundle.push({
-  
           question: part.text,
-  
+
           intent: missing.intent,
-  
+
           keyword: missing.keyword,
-  
+
           type: missing.type,
-  
+
           condition: missing.condition,
-  
+
           place: missing.place,
-  
+
           answer: best.answer,
-  
+
           proof: best.proof,
-  
         });
-  
       } else {
-  
         return {
-  
           ask: missing.ask,
-  
+
           message: missing.message,
-  
+
           context: missing.context,
-  
         };
-  
       }
-  
     } else {
-  
       /* كلمة مفتاحية موجودة */
-  
+
       // 🟢 استخرج القيم من السياق
-  
+
       const { keyword, type, condition, place } = ctx;
-  
-      
-  
+
       lastKeywordCtx = ctx;
-  
+
       /// تُعيد نصًّا منزوع الفراغات أو "" إذا لم تكن القيمة String صافية
-  
+
       const clean = (v) =>
-  
         typeof v === "string"
-  
           ? v.trim() // ✔︎ سلسلة ⇒ نحذف الفراغات
-  
           : Array.isArray(v)
-  
           ? v.map(String).join(" ").trim() // مصفوفة ⇒ نحوّل العناصر ونضمّها
-  
           : ""; // أي شيء آخر ⇒ نعيد ""
-  
+
       // 🟢 تنظيف القيم
-  
+
       const cleanType = clean(type);
-  
+
       const cleanCondition = clean(condition);
-  
+
       const cleanPlace = clean(place);
-  
 
-  
       // 🟢 اختَر أول قيمة غير فارغة لإدراجها بين القوسين
-  
+
       // Assume cleanType, cleanCondition, and cleanPlace are strings (can be empty or contain values)
-  
+
       const items = [cleanType, cleanCondition, cleanPlace];
-  
 
-  
       // Filter out empty or whitespace-only values
-  
+
       const filteredItems = items.filter((item) => item && item.trim() !== "");
-  
 
-  
       // Join them with " , " separator
-  
+
       const extra = filteredItems.join(" , ");
-  
 
-  
       // 🟢 ابنِ جملة السؤال خالية من () الفارغة
-  
-      const question = `ما ${part.intent} ${keyword}${
-  
-        extra ? ` 【 ${extra} 】` : ""
-  
-      } ؟`;
-  
 
-  
+      const question = `ما ${part.intent} ${keyword}${
+        extra ? ` 【 ${extra} 】` : ""
+      } ؟`;
+
       // 🟢 حمّل الإجابات واختر أفضلها
-  
+
       const ansArr = loadAnswersForKeyword(keyword, remote, basePath);
-  
+
       const best = findBestAnswer(
-  
         ansArr,
-  
+
         part.intent,
-  
+
         cleanType,
-  
+
         condition,
-  
+
         cleanPlace
-  
       );
-  
+
       const isLable = lowered
-  
+
         .split(/\s*و\s+/)
-  
+
         .some((part) => part.includes("هل يجوز"));
-  
+
       const label = isLable
-  
         ? best.label && (best.label === "نعم" ? "نعم , " : "لا , ")
-  
         : "";
-  
+
       // 🟢 خزّن كل شيء في الحزمة
-  
+
       answersBundle.push({
-  
         question,
-  
+
         intent: part.intent,
-  
+
         keyword,
-  
+
         type: cleanType || null, // نحفظ undefined إذا لم تكن هناك قيمة فعلية
-  
+
         condition: condition || null,
-  
+
         place: cleanPlace || null,
-  
+
         answer: label + best.answer,
-  
+
         proof: best.proof,
-  
       });
-  
     }
-  
   }
 
   /* 5) أعد النتائج */
