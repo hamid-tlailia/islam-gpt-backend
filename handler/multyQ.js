@@ -183,7 +183,7 @@ function findBestAnswer(answers, intent, type, condition, place) {
   return best
     ? {
         answer: Array.isArray(best.answers)
-          ? best.answers[0]
+          ? best.answers[Math.floor(Math.random() * best.answers.length)]
           : best.answer || "",
         proof: best.proof || [],
         label: best.label || "",
@@ -261,12 +261,13 @@ function handleMultyQ(question, founds, pairs, basePath = "./data") {
   for (const part of parts) {
     let ctx = extractContextFromPart(part.text, keywordsRaw);
     console.log("Parts : ", parts);
+    let lastKeywordCtx = "";
     if (!ctx && lastKeywordCtx) ctx = { ...lastKeywordCtx };
 
     if (!ctx) {
       // لم نجد كلمة مفتاحية → استخدم missingQ
 
-      const foundIntentsStr = [...founds.foundIntents]
+      const foundIntentsStr = [...founds?.foundIntents]
 
         .map((v) => `${v}`)
 
@@ -430,12 +431,42 @@ function handleMultyQ(question, founds, pairs, basePath = "./data") {
       unique.push(a);
     }
   }
+  /* … بعد بناء مصفوفة unique مباشرةً وقبل return … */
 
-  /* 5) أعد النتائج */
+  // ــ تحقق هل الكلمة الوحيدة هي «المفتي»
+  const onlyMufti =
+    unique.length > 0 && // يوجد على الأقل إجابة
+    unique.every((a) => a.keyword === "المفتي");
+
+  // ــ مسار خاص للمفتي
+  if (onlyMufti) {
+    // دمج كل الإجابات (مع ترقيم بسيط)
+    const combined = unique
+      .map((a, i) => `️${a.answer}`) // أو استخدم • أو - بدل الترقيم
+      .join(" , ");
+
+    // يمكن دمج الأدلة إذا احتجت
+    const combinedProof = unique.flatMap((a) => a.proof);
+
+    return {
+      ask: "simple",
+      message: combined, // جواب موحَّد
+      answers: [
+        {
+          intent: unique[0].intent, // أو null إذا تنوّعت
+          keyword: "المفتي",
+          answer: combined,
+          proof: combinedProof,
+        },
+      ],
+    };
+  }
+
+  /*  وإلاّ ابقِ على التصرّف الافتراضي */
   return {
     ask: "split",
     message: "تم تقسيم سؤالك إلى الأجزاء التالية مع إجاباتها:",
-    answers: unique, // ⟵ استخدم القائمة المصفّاة
+    answers: unique,
   };
 
   /* ========= دالة مساعدة لفصل النص على «و» مع الحفاظ على الكلمات ========= */

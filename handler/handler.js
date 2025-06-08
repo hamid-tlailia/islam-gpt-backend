@@ -25,22 +25,44 @@ function loadJSON(f) {
 
 /* ───────── استخراج جميع النيّات ───────── */
 
+/* util: حوِّل النمط إلى “كلمة كاملة” مع مرونة الفراغات */
+function wholePatternFlex(pat) {
+  const esc = pat.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&"); // تهريب المحارف
+  const flex = esc.replace(/\s+/g, "\\s*"); // فراغات مرنة
+  return `(?<![\\p{L}])(?:ال)?${flex}(?![\\p{L}])`; // حدود كلمة
+}
+
+/* نسخة محسَّنة من استخراج جميع النيّات */
 function extractAllIntents(text, intRaw) {
   const t = text.toLowerCase();
-  const arr = [];
+  const hits = [];
 
+  /* اجمع كل المطابقات مع مواضعها وطولها */
   for (const [intent, o] of Object.entries(intRaw)) {
     for (const p of o.patterns) {
-      if (hasWhole(t, p)) {
-        arr.push(intent);
-        break; // إذا أردت إظهار النية لمرة واحدة فقط، احتفظ بهذا
-        // لكن لحذف التكرار تمامًا، استخدم:
-        // if (!arr.includes(intent)) arr.push(intent);
+      const re = new RegExp(wholePatternFlex(p), "giu");
+      let m;
+      while ((m = re.exec(t)) !== null) {
+        hits.push({ intent, index: m.index, length: m[0].length });
       }
     }
   }
 
-  return arr; // مصفوفة بجميع النوايا المتطابقة
+  /* رتِّب: أوّلاً حسب الموضع، ثم الأطول فالأقصر (لإزاحة التداخل) */
+  hits.sort((a, b) =>
+    a.index === b.index ? b.length - a.length : a.index - b.index
+  );
+
+  /* أزِل التداخل وأبقِ على النيّات الفريدة */
+  const result = [];
+  let lastEnd = -1;
+  for (const h of hits) {
+    if (h.index >= lastEnd) {
+      if (!result.includes(h.intent)) result.push(h.intent);
+      lastEnd = h.index + h.length;
+    }
+  }
+  return result; // مثال: ["التحية"] مع "كيف حالك"
 }
 
 /* ───────── استخراج Keyword + سياق مع index ───────── */
@@ -171,9 +193,14 @@ function pickBest(arr, intent, type, cond, place) {
     }
   }
 
+  /* util صغير لاختيار عنصر عشوائى */
+  const rand = (a) => a[Math.floor(Math.random() * a.length)];
+
   return best
     ? {
-        ans: Array.isArray(best.answers) ? best.answers[0] : best.answer || "",
+        ans: Array.isArray(best.answers)
+          ? rand(best.answers) // ⇦ اختيار عشوائى كل مرة
+          : best.answer || "",
         proof: best.proof || [],
         label: best.label || null,
       }
@@ -373,6 +400,22 @@ function findAnswer(question, prev = {}, base = "./data") {
   } else {
     console.log("❌ الشرط غير متحقق.");
   }
+  /* ------------------------------------------------------------------
+   ❶ لا Keyword لكن يوجد Intent واحد على الأقل  ➜  اطلب كلمة مفتاحية
+------------------------------------------------------------------ */
+  if (A.kwCtx.length === 0 && A.intents.size > 0) {
+    const onlyIntent = [...A.intents][0]; // أو ضمّها بفاصلة إن كانت >1
+    return handleMissingQ(question, "", onlyIntent, base);
+  }
+
+  /* ------------------------------------------------------------------
+   ❷ لا Intent إطلاقاً لكن توجد Keywords  ➜  اطلب توضيح النية
+------------------------------------------------------------------ */
+  if (A.intents.size === 0 && A.kwCtx.length === 1 && prev.isMissing) {
+    const firstKeyword = A.kwCtx[0].keyword;
+    return handleMissingQ(question, firstKeyword, null, base);
+  }
+
   /* — 1. لا Keyword إطلاقًا → جرّب وراثة آخر Keyword محفوظ */
   if (A.kwCtx.length === 0) {
     if (_lastCtx) {
@@ -418,11 +461,13 @@ function findAnswer(question, prev = {}, base = "./data") {
     if (r) return r;
   }
   // Hnadle multy intents for 1 keyword
-  if (A.intents.size > 1 && _lastCtx.keyword !== "") {
+  if (A.intents.size > 1 && _lastCtx?.keyword !== "") {
     const q = Array.from(A.intents)
-      .map((intent) => `${intent} ${_lastCtx.keyword}`)
+      .map((intent) => `${intent} ${_lastCtx?.keyword}`)
       .join(" و "); // تفصلهم بواو (و) مثلا: "حكم الصيام و تعريف الصيام"
-    const r = handleMultyQ(q, "", "", base);
+    const founds = A;
+    const pairs = A.pairs;
+    const r = handleMultyQ(q, founds, pairs, base);
     if (r) return r;
   }
   if (A.intents.size === 1 && A.pairs.size === 1) {
@@ -436,7 +481,6 @@ function findAnswer(question, prev = {}, base = "./data") {
         .filter(Boolean);
 
       const results = [];
-      const kwCtx = A.kwCtx.find((k) => k.keyword === keyword); // الحصول على سياق الكلمة
 
       for (const item of splitItems) {
         const kwCtx = A.kwCtx.find((k) => k.keyword === keyword);
@@ -518,7 +562,98 @@ function findAnswer(question, prev = {}, base = "./data") {
       );
     }
   }
+  if (A.intents.size === 0 && A.pairs.size === 1) {
+    if (isMulti(A.kwCtx)) {
+      const intent = [...A.intents][0] || "حكم";
+      const keyword = [...A.pairs][0].split("::")[0];
+      const typeCondString = [...A.pairs][0].split("::")[1];
+      const splitItems = typeCondString
+        .split(",")
+        .map((x) => x.trim())
+        .filter(Boolean);
 
+      const results = [];
+
+      for (const item of splitItems) {
+        const kwCtx = A.kwCtx.find((k) => k.keyword === keyword);
+        let type = null,
+          condition = null,
+          place = null;
+
+        if (kwCtx) {
+          // تحقق من type
+          if (Array.isArray(kwCtx.type) && kwCtx.type.includes(item)) {
+            type = item;
+          } else if (typeof kwCtx.type === "string" && kwCtx.type === item) {
+            type = item;
+          }
+
+          // تحقق من condition
+          if (
+            Array.isArray(kwCtx.condition) &&
+            kwCtx.condition.includes(item)
+          ) {
+            condition = item;
+          } else if (
+            typeof kwCtx.condition === "string" &&
+            kwCtx.condition === item
+          ) {
+            condition = item;
+          }
+
+          // تحقق من place (إن وجد)
+          if (Array.isArray(kwCtx.place) && kwCtx.place.includes(item)) {
+            place = item;
+          } else if (typeof kwCtx.place === "string" && kwCtx.place === item) {
+            place = item;
+          }
+
+          // 🔥 🔥 بناء extras لكل item بشكل منفصل 🔥 🔥
+          const extras = [type, condition, place].filter((x) => x).join(" , ");
+
+          const ansArr = loadAns(keyword, remote, base);
+          const best = pickBest(ansArr, intent, type, condition, place);
+
+          results.push({
+            question: `ما ${intent} ${keyword}${
+              extras ? ` 【 ${extras} 】` : ""
+            } ؟`,
+            intent,
+            keyword,
+            type: type || null,
+            condition: condition || null,
+            place: place || null,
+            answer: best.ans,
+            proof: best.proof,
+          });
+        }
+      }
+
+      return {
+        ask: "split",
+        message: "تم تقسيم سؤالك بناءً على pairs:",
+        answers: results,
+      };
+    } else {
+      // الحالة simple
+      const intent = [...A.intents][0];
+      const bestCtx = A.kwCtx[0];
+      const keyword = bestCtx.keyword;
+      const type = bestCtx.type;
+      const condition = bestCtx.condition;
+      const place = bestCtx.place;
+      _lastCtx = { keyword, type, condition, place };
+      return formatAnswer(
+        keyword,
+        intent,
+        type,
+        condition,
+        place,
+        remote,
+        base
+      );
+    }
+  }
   /* — 4. Intentات متعددة → handleMultyQ */
   if (A.intents.size > 1) {
     const founds = {
