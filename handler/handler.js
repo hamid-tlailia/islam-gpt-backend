@@ -403,15 +403,19 @@ function findAnswer(question, prev = {}, base = "./data") {
   /* ------------------------------------------------------------------
    ❶ لا Keyword لكن يوجد Intent واحد على الأقل  ➜  اطلب كلمة مفتاحية
 ------------------------------------------------------------------ */
-  if (A.kwCtx.length === 0 && A.intents.size > 0) {
+  if (A.pairs.length === 0 && A.intents.size > 0 && !_lastCtx) {
+    console.log("you are here ===========================");
     const onlyIntent = [...A.intents][0]; // أو ضمّها بفاصلة إن كانت >1
     return handleMissingQ(question, "", onlyIntent, base);
   }
-
+  if (A.pairs.length === 1 && A.intents.size > 0) {
+    console.log("you are here ===========================");
+  }
   /* ------------------------------------------------------------------
    ❷ لا Intent إطلاقاً لكن توجد Keywords  ➜  اطلب توضيح النية
 ------------------------------------------------------------------ */
   if (A.intents.size === 0 && A.kwCtx.length === 1 && prev.isMissing) {
+    console.log("ggggg");
     const firstKeyword = A.kwCtx[0].keyword;
     return handleMissingQ(question, firstKeyword, null, base);
   }
@@ -660,7 +664,7 @@ function findAnswer(question, prev = {}, base = "./data") {
       foundIntents: A.intents,
       foundKeywords: new Set(A.kwCtx.map((k) => k.keyword)),
     };
-    const r = handleMultyQ(question, founds, base);
+    const r = handleMultyQ(question, founds, A.pairs, base);
     if (r) return r;
   }
   const splitedQ = question

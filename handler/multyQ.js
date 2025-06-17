@@ -257,11 +257,11 @@ function handleMultyQ(question, founds, pairs, basePath = "./data") {
       lastIntent = defaultIntent;
     }
   }
-
+  let lastKeywordCtx = null; // السياق للكلمة المفتاحية الأخيرة
   for (const part of parts) {
     let ctx = extractContextFromPart(part.text, keywordsRaw);
     console.log("Parts : ", parts);
-    let lastKeywordCtx = "";
+    console.log("found intents : ", founds?.foundIntents);
     if (!ctx && lastKeywordCtx) ctx = { ...lastKeywordCtx };
 
     if (!ctx) {
@@ -320,7 +320,7 @@ function handleMultyQ(question, founds, pairs, basePath = "./data") {
       }
     } else {
       /* كلمة مفتاحية موجودة */
-
+      if (ctx) lastKeywordCtx = ctx; // حدِّثه عند العثور على Keyword
       // 🟢 استخرج القيم من السياق
 
       const { keyword, type, condition, place } = ctx;
