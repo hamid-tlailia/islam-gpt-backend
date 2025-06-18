@@ -16,7 +16,11 @@ function wholePattern(pattern) {
   // 3) أضف حدود الكلمة العربية مع السماح بـ (ال)
   return `(?<![\\p{L}])(?:ال)?${flex}(?![\\p{L}])`;
 }
-
+/* ٢) تابع مختصر لفحص التطابق الكامل */
+function matchWhole(text, term) {
+  const re = new RegExp(wholePattern(term), "iu");
+  return re.test(text);
+}
 /* — النسخة المنقَّحة من extractIntentPositions — */
 function extractIntentPositions(text, intentsRaw) {
   const lowered = text.toLowerCase();
@@ -82,14 +86,16 @@ function matchPattern(text, pattern) {
 }
 
 /* ── النسخة الديناميّة من extractContextFromPart ───────── */
+/******************* الدالة المنقَّحة ********************/
 function extractContextFromPart(text, keywordsRaw) {
+  // ⚠️ الإبقاء على النص كما هو (لا نحتاج lower فقط؛ RegExp unicode أفضل)
   const lowered = text.toLowerCase();
   let fallbackCtx = null;
 
   for (const [keyword, data] of Object.entries(keywordsRaw)) {
-    /* 1️⃣ هل ذُكرت الكلمة المفتاحيّة صراحةً؟ */
+    /* 1️⃣ تحقَّق من وجود الكلمة المفتاحية أو أحد مرادفاتها ككلمة تامة */
     const kwTerms = [keyword, ...(data.variants || [])];
-    const hasKeyword = kwTerms.some((t) => lowered.includes(t.toLowerCase()));
+    const hasKeyword = kwTerms.some((t) => matchWhole(lowered, t));
 
     /* 2️⃣ تجميع المطابقات */
     const tHits = [],
@@ -98,31 +104,31 @@ function extractContextFromPart(text, keywordsRaw) {
 
     // ⬤ types
     for (const [typ, pats] of Object.entries(data.types || {})) {
-      const hit = [typ, ...pats].some((p) => matchPattern(lowered, p));
+      const hit = [typ, ...pats].some((p) => matchWhole(lowered, p));
       if (hit) tHits.push(typ);
     }
 
     // ⬤ conditions
     for (const [cond, pats] of Object.entries(data.conditions || {})) {
-      const hit = pats.some((p) => matchPattern(lowered, p));
+      const hit = pats.some((p) => matchWhole(lowered, p));
       if (hit) cHits.push(cond);
     }
 
     // ⬤ places
     for (const [plc, pats] of Object.entries(data.places || {})) {
-      const hit = pats.some((p) => matchPattern(lowered, p));
+      const hit = pats.some((p) => matchWhole(lowered, p));
       if (hit) pHits.push(plc);
     }
 
-    /* 3️⃣ إذا لم نجد أيّ ارتباط → انتقل للـ keyword التالية */
+    /* 3️⃣ إذا لم نجد أى ارتباط → تابع للكلمة التالية */
     if (!hasKeyword && !tHits.length && !cHits.length && !pHits.length)
       continue;
 
-    /* 4️⃣ أزل التداخل (condition يتغلّب على type عند التكرار) */
+    /* 4️⃣ إزالة التداخل: الشرط يغلب النوع */
     const uniqCond = cHits.filter((c) => !tHits.includes(c));
     const uniqType = tHits.filter((t) => !cHits.includes(t));
 
-    /* 5️⃣ اختر الأطول */
+    /* 5️⃣ اختر الأطول (أدقّ) */
     const chosenCond = pickLongest(uniqCond);
     const chosenType = chosenCond ? null : pickLongest(uniqType);
 
@@ -136,7 +142,7 @@ function extractContextFromPart(text, keywordsRaw) {
     /* 6️⃣ إذا وُجدت الكلمة المفتاحيّة صراحةً فارجع فورًا */
     if (hasKeyword) return ctx;
 
-    /* 7️⃣ وإلاّ خزّنه كاحتمال احتياطىّ */
+    /* 7️⃣ وإلاّ خزّنه كاحتمال احتياطى */
     if (!fallbackCtx) fallbackCtx = ctx;
   }
   return fallbackCtx; // قد تكون null

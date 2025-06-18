@@ -67,36 +67,56 @@ function extractAllIntents(text, intRaw) {
 
 /* ───────── استخراج Keyword + سياق مع index ───────── */
 
+/******************* أداة المساعدة ********************/
+function wholePattern(pattern) {
+  const esc = pattern.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const flex = esc.replace(/\s+/g, "\\s*");
+  return `(?<![\\p{L}])(?:ال)?${flex}(?![\\p{L}])`;
+}
+
+function hasWhole(text, pattern) {
+  const re = new RegExp(wholePattern(pattern), "iu");
+  return re.test(text);
+}
+
+/******************* النسخة الدقيقة من extractKwCtx ********************/
 function extractKwCtx(text, kwRaw) {
-  const low = text.toLowerCase(),
-    res = [];
+  const low = text.toLowerCase();
+  const res = [];
+
   for (const [kw, data] of Object.entries(kwRaw)) {
     const hit = [kw, ...(data.variants || [])].find((v) => hasWhole(low, v));
     if (!hit) continue;
 
-    const firstIdx = low.indexOf(hit.toLowerCase());
+    const firstIdx = low.search(new RegExp(wholePattern(hit), "iu"));
 
     let type = null;
-    if (data.types)
-      for (const [ty, vals] of Object.entries(data.types))
+    if (data.types) {
+      for (const [ty, vals] of Object.entries(data.types)) {
         if ([ty, ...vals].some((v) => hasWhole(low, v))) {
           type = ty;
           break;
         }
+      }
+    }
 
     let place = null;
-    if (data.places)
-      for (const [pl, vals] of Object.entries(data.places))
+    if (data.places) {
+      for (const [pl, vals] of Object.entries(data.places)) {
         if (vals.some((v) => hasWhole(low, v))) {
           place = pl;
           break;
         }
+      }
+    }
 
     const conds = [];
-    if (data.conditions)
-      for (const [c, vals] of Object.entries(data.conditions))
+    if (data.conditions) {
+      for (const [c, vals] of Object.entries(data.conditions)) {
         if (vals.some((v) => hasWhole(low, v))) conds.push(c);
-    // 🔥 أضف هنا استرجاع الـ label
+      }
+    }
+
     const label = data.label || null;
     const push = (cond) =>
       res.push({
@@ -112,8 +132,10 @@ function extractKwCtx(text, kwRaw) {
     if (conds.length) conds.forEach(push);
     else push(null);
   }
+
   return res;
 }
+
 
 /* ───────── فلترة الكلمات المتضمَّنة ───────── */
 

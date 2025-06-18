@@ -79,7 +79,7 @@ function detectKeywordInQuestion(q, raw) {
       hits.push({
         keyword: k,
         variantMatched: variantHit,
-        len: variantHit.length,
+        len: variantHit?.length,
       });
     }
   }
